@@ -1,0 +1,33 @@
+# Android
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+.gradle/
+build/
+local.properties
+*.jks
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.androidide/
+
+# Models (download separately - too big for git)
+*.gguf
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+llama_server.log
+
+# llama.cpp vendored build outputs
+app/src/main/cpp/llama.cpp/build*/
+app/src/main/cpp/.cxx/
+app/.cxx/
+*.so

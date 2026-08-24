@@ -1,0 +1,76 @@
+<resources>
+    <!-- 已有内容 -->
+    <string name="app_name">GooseDroid</string>
+    <string name="Config">Config</string>
+    <string name="EnableMods">EnableMods</string>
+    <string name="SilenceSounds">SilenceSounds</string>
+    <string name="Task_CanAttackMouse">Task_CanAttackMouse</string>
+    <string name="AttackRandomly">AttackRandomly</string>
+    <string name="UseCustomColors">UseCustomColors</string>
+    <string name="ShowShadow">ShowShadow</string>
+    <!-- MobileBot Phase 1 -->
+    <string name="LlmHost">🧠 LLM Server (PC)</string>
+    <string name="TalkToPet">💬 คุยกับน้องหมี</string>
+    <string name="GooseDefaultWhite">GooseDefaultWhite</string>
+    <string name="GooseDefaultOrange">GooseDefaultOrange</string>
+    <string name="GooseDefaultOutline">GooseDefaultOutline</string>
+    <string name="MinWanderingTimeSeconds">MinWanderingTimeSeconds</string>
+    <string name="MaxWanderingTimeSeconds">MaxWanderingTimeSeconds</string>
+    <string name="FirstWanderTimeSeconds">FirstWanderTimeSeconds</string>
+    <string name="DrawSize">DrawSize</string>
+    <string name="GooseDroidEnable">GooseDroid Enable</string>
+    <string name="GooseDroidDisable">GooseDroid Disable</string>
+    <string name="PleaseEnableFloatingWindowPermission">Please enable the floating window permission</string>
+    <string name="Running">Running</string>
+    <string name="ConfigFilePath">Config File Path</string>
+    <string name="ResetDefaultConfig">Reset To Default Config</string>
+    <string name="SaveConfig">Save Config</string>
+    <string name="EditConfig">Edit Config</string>
+    <string name="SaveSuccessfully">Save successfully</string>
+    <string name="ResetSuccessfully">Reset successfully</string>
+    <string name="About">About</string>
+    <string name="Confirm">Confirm</string>
+    <string name="Cancel">Cancel</string>
+    <string name="Copy">Copy</string>
+    <string name="AboutText">by:\\ncaofangkuai\\nYouTube:@caofangkuai\\nBiliBili:space.bilibili.com/3546724471671510\\nCookieBox\\nYoutube:@CookieBoxCHN\\nBiliBili:space.bilibili.com/648318676\\nGithub:github.com/caofangkuai/GooseDroid</string>
+    <string name="Update">Update</string>
+
+    <!-- Pet Mode Strings -->
+    <string name="PetMode">Pet Mode</string>
+    <string name="EnablePetMode">Enable Pet Mode</string>
+    <string name="EnableTouch">Enable Touch Interaction</string>
+    <string name="PetStatus">Pet Status</string>
+    <string name="Hunger">Hunger</string>
+    <string name="Energy">Energy</string>
+    <string name="Happiness">Happiness</string>
+    <string name="Feed">Feed</string>
+    <string name="Play">Play</string>
+    <string name="Sleep">Sleep</string>
+    <string name="FeedingPet">Feeding your pet...</string>
+    <string name="PlayingWithPet">Playing with your pet!</string>
+    <string name="PetSleeping">Your pet is sleeping...</string>
+    <string name="PetTooTired">Your pet is too tired to play!</string>
+
+    <!-- Pet Mood States -->
+    <string name="MoodHungry">Hungry</string>
+    <string name="MoodTired">Tired</string>
+    <string name="MoodSad">Sad</string>
+    <string name="MoodHappy">Happy</string>
+    <string name="MoodNeutral">Content</string>
+
+    <!-- Pet Customization -->
+    <string name="Customize">Customize</string>
+    <string name="PetName">Pet Name</string>
+    <string name="CreatureType">Creature Type</string>
+    <string name="Accessories">Accessories</string>
+    <string name="Hat">Hat</string>
+    <string name="Accessory">Accessory</string>
+
+    <!-- Widget -->
+    <string name="widget_description">Display your pet\'s status and quick actions on your home screen.</string>
+
+    <!-- Input Validation Messages -->
+    <string name="DrawSizeTooSmall">Draw size too small, set to minimum (0.1)</string>
+    <string name="DrawSizeTooLarge">Draw size too large, set to maximum (10.0)</string>
+    <string name="InvalidDrawSize">Invalid draw size, reset to default (1.0)</string>
+</resources>

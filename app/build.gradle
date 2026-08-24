@@ -1,0 +1,107 @@
+plugins {
+    id 'com.android.application'
+}
+
+def keystoreFilepath = ''
+def keystorePSW = ''
+def keystoreAlias = ''
+def keystoreAliasPSW = ''
+// default keystore file, PLZ config file path in local.properties
+def keyfile = file('s.keystore.temp')
+
+Properties properties = new Properties()
+// local.properties file in the root director
+properties.load(project.rootProject.file('local.properties').newDataInputStream())
+keystoreFilepath = properties.getProperty("keystore.path")
+
+if (keystoreFilepath) {
+    keystorePSW = properties.getProperty("keystore.password")
+    keystoreAlias = properties.getProperty("keystore.alias")
+    keystoreAliasPSW = properties.getProperty("keystore.alias_password")
+    keyfile = file(keystoreFilepath)
+}
+
+android {
+    namespace 'com.cfks.goosedroid'
+    compileSdk 34
+    ndkVersion "26.1.10909125"
+
+    // MobileBot Phase 1: llama.cpp native build
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1+"
+        }
+    }
+
+
+    defaultConfig {
+        applicationId "com.cfks.goosedroid"
+        minSdk 24
+        targetSdk 36
+        versionCode 5
+        versionName '1.0.4'
+
+        // MobileBot Phase 1: on-device LLM (llama.cpp JNI)
+        externalNativeBuild {
+                    cmake {
+                        arguments "-DCMAKE_BUILD_TYPE=Release",
+                                  "-DANDROID_STL=c++_shared",
+                                  "-DLLAMA_BUILD_COMMON=ON"
+                        cppFlags "-std=c++17 -frtti -fexceptions"
+                    }
+                }
+        ndk {
+            abiFilters "arm64-v8a"   // มือถือจริงก่อน (x86_64 emulator เพิ่มทีหลังเมื่อเครื่องไหว)
+        }
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            zipAlignEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            println("WITH -> buildTypes -> release: using default key")
+        }
+
+        debug {
+            println("WITH -> buildTypes -> debug: using default key")
+        }
+    }
+
+    // Solo configurar signing si existe keystore personalizado
+    if (keyfile.exists()) {
+        signingConfigs {
+            release {
+                keyAlias keystoreAlias
+                keyPassword keystoreAliasPSW
+                storeFile keyfile
+                storePassword keystorePSW
+            }
+        }
+        buildTypes.release.signingConfig signingConfigs.release
+        println("Custom keystore found, using it for release")
+    }
+    
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation libs.appcompat
+    implementation libs.material // 或者更高版本
+
+    implementation libs.activity
+    implementation libs.constraintlayout
+    testImplementation libs.junit
+    testImplementation 'org.json:json:20180813'
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+}
