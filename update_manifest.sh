@@ -1,0 +1,2 @@
+sed -i '/<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" \/>/a \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' app/src/main/AndroidManifest.xml
+sed -i 's/<service android:name=".OverlayService" android:foregroundServiceType="specialUse" \/>/<service android:name=".OverlayService" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Floating Character" \/>\n        <\/service>/g' app/src/main/AndroidManifest.xml

@@ -1,0 +1,1 @@
+sed -i 's/val inputStream = contentResolver.openInputStream(uri)/val inputStream = if (uri.scheme == "file") java.io.File(uri.path!!).inputStream() else contentResolver.openInputStream(uri)/' app/src/main/java/com/cfks/goosedroid/OverlayService.kt

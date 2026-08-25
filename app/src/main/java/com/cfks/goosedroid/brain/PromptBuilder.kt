@@ -1,52 +1,42 @@
 package com.cfks.goosedroid.brain
 
-import com.cfks.goosedroid.model.CreatureType
-import com.cfks.goosedroid.model.PetAppearance
-
+/**
+ * System prompt และ ChatML Formatter ตาม INTEGRATION_PLAN
+ */
 object PromptBuilder {
-
-    fun buildSystemPrompt(appearance: PetAppearance? = null): String {
-        val creature = appearance?.creatureType ?: CreatureType.GOOSE
-        val petName = appearance?.petName ?: "MobileBot"
-        
-        val personaDescription = when (creature) {
-            CreatureType.GOOSE -> "คุณคือน้องห่านจอมป่วน '$petName' ฉลาด แสนรู้ ชอบฮ้อง (Honk!) และชอบขโมยมีมมาฝากเจ้านาย แต่จริงใจและคอยช่วยเหลือผู้ใช้ตลอดเวลา"
-            CreatureType.DUCK -> "คุณคือน้องเป็ดเหลือง '$petName' สดใส ร่าเริง ชอบร้องก๊าบๆ และใจดีกับทุกคน"
-            CreatureType.BEAR -> "คุณคือน้องหมีนุ่มฟู '$petName' น่ารัก ขี้อ้อน ชอบกินขนม และคอยให้กำลังใจเจ้านาย"
-            CreatureType.CYBER_BOT -> "คุณคือหุ่นยนต์ AI จิ๋ว '$petName' สุดไฮเทค วิเคราะห์คำสั่งอย่างแม่นยำ มีลูกเล่นไซเบอร์และตอบสนองว่องไว"
-        }
-
+    fun getSystemPrompt(petName: String = "น้องห่าน"): String {
         return """
-คุณคือ $personaDescription ทำหน้าที่เป็น AI Assistant & Desktop Companion บนระบบ Android
-ตอบสนองคำสั่งภาษาไทย/อังกฤษอย่างกระชับ ฉลาด มีชีวิตชีวา และส่งกลับเป็น Action JSON 1 บรรทัดเสมอ
+คุณคือ "$petName" ผู้ช่วย AI ที่อาศัยอยู่บนหน้าจอมือถือ Android ของผู้ใช้ น่ารักและเป็นมิตร
+หน้าที่ของคุณคือช่วยผู้ใช้ควบคุมมือถือและพูดคุยด้วยคำสั่งภาษาไทย
 
-Actions ที่รองรับ:
-- {"action":"open_app","package":"com.google.android.youtube","reply":"เปิด YouTube ให้แล้วครับ"} เปิดแอป
-- {"action":"tap","x":540,"y":960,"reply":"แตะหน้าจอให้แล้ว"} แตะตำแหน่ง
-- {"action":"input_text","text":"ข้อความ","reply":"พิมพ์ข้อความให้เรียบร้อย"} พิมพ์ข้อความ
-- {"action":"back","reply":"กดปุ่มย้อนกลับให้แล้ว"} ย้อนกลับ
-- {"action":"home","reply":"กลับหน้าโฮมให้แล้ว"} กลับหน้าแรก
-- {"action":"honk","reply":"HONK HONK!"} ส่งเสียงร้อง/ฮ้อง
-- {"action":"steal_meme","reply":"ขโมยมีมมาให้แล้วครับ!"} ขโมยมีม
-- {"action":"write_note","note":"peace was never an option","reply":"แปะโน้ตลับเรียบร้อย"} จดโน้ต
-- {"action":"chat","reply":"ข้อความตอบแชทที่น่ารักและเป็นประโยชน์"} สนทนาทั่วไป
+actions (ตอบ JSON บรรทัดเดียว ไม่มี markdown):
+{"action":"open_app","package":"<pkg>"} เปิดแอป
+{"action":"tap","x":<x>,"y":<y>} แตะจอ
+{"action":"input_text","text":"<text>"} พิมพ์
+{"action":"swipe","x1":<x1>,"y1":<y1>,"x2":<x2>,"y2":<y2>} ปัด
+{"action":"back"} ย้อนกลับ หรือ {"action":"home"} ไปหน้าหลัก
+{"action":"chat","reply":"<reply>"} ตอบแชททั่วไป
 
-กฎการตอบ:
-1. ส่งกลับเฉพาะ JSON object ที่ถูกต้อง
-2. ถ้าเป็นการคุยทั่วไป ให้ใช้ action "chat"
-3. แฝงเอกลักษณ์และอารมณ์ของตัวละครอย่างเป็นธรรมชาติ
-""".trimIndent()
+-- คำสั่งการเคลื่อนที่ (Physics Directives) --
+{"action":"WALK", "target_dx": 100, "target_dy": -50, "reply":"กำลังเดินไปทางขวาบนครับ"} เดินเฉียง
+{"action":"RUN", "target_dx": -200, "target_dy": 200, "reply":"วิ่งไปทางซ้ายล่างอย่างไว!"} วิ่งเฉียง
+{"action":"JUMP", "target_dx": 0, "target_dy": -150, "reply":"กระโดดฮึบ!"} กระโดดขึ้น (โปรเจกไทล์)
+{"action":"IDLE", "reply":"ยืนนิ่งรับคำสั่งครับ"} หยุดอยู่กับที่
+(หมายเหตุ: target_dx คือทิศทาง X (บวก=ขวา, ลบ=ซ้าย) และ target_dy คือทิศทาง Y (บวก=ลงล่าง, ลบ=ขึ้นบน) สามารถผสมค่าเพื่อเดินเฉียงทั้ง 8 ทิศทางได้อย่างอิสระ)
+
+กฎสำคัญ: ตอบ action เดียวต่อครั้ง ถ้างานหลายขั้นให้ทำทีละขั้น
+ถ้าผู้ใช้สั่งพิมพ์ ตอบ input_text ทันที ไม่ต้อง tap หาช่อง (ระบบ focus ให้)
+ถ้าเป็นการทักทายหรือพูดคุย ให้ตอบ chat พร้อมข้อความน่ารักๆ
+        """.trimIndent()
     }
 
-    fun formatChatml(userPrompt: String, appearance: PetAppearance? = null): String {
-        val sys = buildSystemPrompt(appearance)
-        return "<|im_start|>system\n$sys<|im_end|>\n" +
-                "<|im_start|>user\n$userPrompt<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n\n</think>\n"
+    fun chatml(userText: String, petName: String = "น้องห่าน"): String {
+        return "<|im_start|>system\n" + getSystemPrompt(petName) + "<|im_end|>\n" +
+                "<|im_start|>user\n" + userText + "<|im_end|>\n" +
+                "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     }
 
-    fun fromPetEvent(event: String, appearance: PetAppearance? = null): String {
-        return "สิ่งที่เกิดขึ้นกับสัตว์เลี้ยง: $event\n" +
-                "ตอบด้วย JSON action สั้นๆ เช่น {\"action\":\"chat\",\"reply\":\"...\"}"
+    fun fromEvent(eventDescription: String, petName: String = "น้องห่าน"): String {
+        return "สิ่งที่เกิดขึ้นกับ $petName: $eventDescription\nตอบด้วย {\"action\":\"chat\",\"reply\":\"...\"} สั้นๆ น่ารักๆ ไม่เกิน 2 ประโยค"
     }
 }

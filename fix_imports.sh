@@ -1,0 +1,1 @@
+sed -i '1i import androidx.compose.ui.graphics.drawscope.withTransform\nimport androidx.compose.ui.graphics.drawscope.scale\nimport androidx.compose.ui.graphics.drawscope.translate\nimport androidx.compose.ui.graphics.drawscope.rotate' app/src/main/java/com/cfks/goosedroid/ui/components/SpritePetView.kt

@@ -1,138 +1,189 @@
 package com.cfks.goosedroid.brain
 
-import android.util.Log
-import com.cfks.goosedroid.model.LlmActionJson
-import com.cfks.goosedroid.model.PetAppearance
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-data class BrainTelemetry(
-    val activeBackendName: String = "Smart Agent Brain",
-    val activeBackendType: LlmBackendType = LlmBackendType.SMART_RULE_ENGINE,
-    val lastLatencyMs: Long = 0,
-    val totalInferences: Int = 0,
-    val statusMessage: String = "Ready"
-)
-
+/**
+ * PetBrain - ตัวขับเคลื่อนความคิดและการตอบสนองของตัวละคร ตาม INTEGRATION_PLAN
+ * รองรับการแยก Context และความจำเฉพาะของตัวละครแต่ละตัวตามชื่อเฉพาะ
+ */
 object PetBrain {
 
-    private const val TAG = "PetBrain"
+    suspend fun processCommand(userText: String, petName: String = "น้องห่าน"): LlmActionResult = withContext(Dispatchers.Default) {
+        val trimmed = userText.trim()
+        val lower = trimmed.lowercase()
 
-    private val smartRuleBackend = LocalSmartRuleBackend()
-    private val httpBackend = HttpLlmBackend()
-    private val petLlamaBackend = PetLlamaBackend()
+        // บันทึก Log การสั่งการลงใน Context เฉพาะตัวของตัวละครนี้
+        CharacterRegistry.addInteractionLog(petName, "USER: $trimmed")
 
-    private var preferredBackendType = LlmBackendType.SMART_RULE_ENGINE
+        // ตรวจสอบ Moveset พิเศษและ Custom Dialogue ที่ผู้ใช้กำหนดไว้ในตัวละครนี้
+        val unitInfo = CharacterRegistry.getUnitInfo(petName)
+        val matchedMoveset = unitInfo?.moveSets?.firstOrNull { move ->
+            val moveNameLower = move.name.trim().lowercase()
+            val moveDescLower = move.description.trim().lowercase()
+            (moveNameLower.isNotEmpty() && (lower.contains(moveNameLower) || lower.contains(moveNameLower.replace("_", " ")))) ||
+            (moveDescLower.isNotEmpty() && lower.split(" ").any { word -> word.length > 2 && moveDescLower.contains(word) })
+        }
 
-    private val _telemetry = MutableStateFlow(BrainTelemetry())
-    val telemetry: StateFlow<BrainTelemetry> = _telemetry.asStateFlow()
-
-    private val THAI_GREETINGS = listOf(
-        "ฮ้องงงง! มีอะไรให้น้องช่วยไหมครับ?",
-        "ก๊าบๆ! วันนี้อยากให้ป่วนหรือช่วยอะไรดี?",
-        "Peace was never an option... แต่คุยกับคุณได้เสมอนะ!",
-        "พร้อมรับคำสั่งแล้ว! แตะจอ พิมพ์แชท หรือจะให้ลักพาตัวมีมมาส่ง?",
-        "น้องพร้อมลุย! สั่งเปิดแอป พิมพ์งาน หรือส่งเสียงฮ้องได้เลยจ้า"
-    )
-
-    private val PETTED_REPLIES = listOf(
-        "งื้อออ สบายจัง ลูบหัวบ่อยๆ นะ ❤️",
-        "แฮปปี้มากเลย! ความสุขพุ่งทะลุ 100 แล้ว!",
-        "ขนฟูหมดแล้วเนี่ย แต่ชอบนะ ลูบอีกสิ!",
-        "Purrrr... ถึงจะเป็นห่านแต่ก็ครางแบบแมวได้นะ!",
-        "ก๊าบ~ ใจฟูสุดๆ รักเจ้านายที่สุดเลย!"
-    )
-
-    private val FED_REPLIES = listOf(
-        "งั่มๆๆ! ขนมปังกรอบอร่อยมากกก!",
-        "อิ่มแป้เลย! พลังงานเต็ม 100 พร้อมป่วนต่อ!",
-        "ขอบคุณสำหรับของว่างครับเจ้านาย!",
-        "ของโปรดเลย! ครั้งหน้าขอแอปเปิ้ลด้วยนะ!"
-    )
-
-    private val MISCHIEF_QUOTES = listOf(
-        "แอบเอาโน้ต 'peace was never an option' ไปซ่อนแป๊บ...",
-        "เห็นอะไรวิบวับบนหน้าจอไหม? เดี๋ยวแอบคาบมาให้นะ!",
-        "HONK HONK HONK!! เสียงดังฟังชัดไหม?",
-        "งานของคุณเสร็จหรือยัง? ถ้าง่วงมาเล่นกับน้องก่อนสิ!",
-        "ภารกิจวันนี้: ขโมยมีม 3 ชิ้น และวิ่งรอบหน้าจอ 10 รอบ!"
-    )
-
-    fun setPreferredBackend(type: LlmBackendType) {
-        preferredBackendType = type
-        updateTelemetryStatus()
-    }
-
-    fun setModelPath(path: String) {
-        petLlamaBackend.setModelPath(path)
-        updateTelemetryStatus()
-    }
-
-    fun setHttpEndpoint(url: String) {
-        httpBackend.endpointUrl = url
-        updateTelemetryStatus()
-    }
-
-    private fun updateTelemetryStatus() {
-        val backend = getActiveBackend()
-        _telemetry.value = _telemetry.value.copy(
-            activeBackendName = backend.backendName,
-            activeBackendType = backend.backendType,
-            statusMessage = backend.getStatusDetails()
-        )
-    }
-
-    fun getActiveBackend(): LlmBackend {
-        return when (preferredBackendType) {
-            LlmBackendType.ON_DEVICE_GGUF -> {
-                if (petLlamaBackend.isAvailable()) petLlamaBackend else smartRuleBackend
+        // Match common Android / Thai assistant intents or Custom Moveset
+        val result = when {
+            matchedMoveset != null -> {
+                val customSpeech = if (matchedMoveset.dialogue.isNotBlank()) {
+                    matchedMoveset.dialogue
+                } else if (matchedMoveset.description.isNotBlank()) {
+                    "กำลังแสดงท่าทาง ${matchedMoveset.name} (${matchedMoveset.description}) ตามคำสั่งครับ"
+                } else {
+                    "รับทราบครับ กำลังแสดงท่าทาง ${matchedMoveset.name} ให้ผู้บัญชาการชมครับ"
+                }
+                LlmActionResult(
+                    action = LlmActionJson(action = "custom_action", moveset = matchedMoveset.name, reply = customSpeech),
+                    displayReply = customSpeech,
+                    actionBadge = "ACTION // ${matchedMoveset.name.uppercase()}"
+                )
             }
-            LlmBackendType.LOCAL_SERVER -> {
-                if (httpBackend.isAvailable()) httpBackend else smartRuleBackend
+            lower.contains("กระโดด") || lower.contains("jump") || lower.contains("โดด") -> {
+                val reply = "รับทราบครับ กำลังกระโดดตามคำสั่งผู้บัญชาการ!"
+                LlmActionResult(
+                    action = LlmActionJson(action = "JUMP", moveset = "JUMP", reply = reply, target_dx = 150f, target_dy = -150f),
+                    displayReply = reply,
+                    actionBadge = "PHYSICS // JUMP"
+                )
             }
-            LlmBackendType.SMART_RULE_ENGINE -> smartRuleBackend
+            lower.contains("วิ่ง") || lower.contains("run") || lower.contains("สปรินต์") -> {
+                val reply = "รับทราบครับ กำลังวิ่งลาดตระเวนด้วยความเร็วสูง!"
+                LlmActionResult(
+                    action = LlmActionJson(action = "RUN", moveset = "RUN", reply = reply, target_dx = -250f, target_dy = 0f),
+                    displayReply = reply,
+                    actionBadge = "DIRECTIVE // RUN"
+                )
+            }
+            lower.contains("เดิน") || lower.contains("walk") || lower.contains("ไปข้างหน้า") -> {
+                val reply = "รับทราบครับ กำลังเดินตามเส้นทางที่สั่งการ"
+                LlmActionResult(
+                    action = LlmActionJson(action = "WALK", moveset = "WALK", reply = reply, target_dx = 120f, target_dy = -80f),
+                    displayReply = reply,
+                    actionBadge = "DIRECTIVE // WALK"
+                )
+            }
+            lower.contains("หยุด") || lower.contains("อยู่นิ่ง") || lower.contains("ยืนนิ่ง") || lower.contains("idle") || lower.contains("stop") || lower.contains("stay") -> {
+                val reply = "รับทราบครับ ยูนิต $petName หยุดนิ่งและรักษาตำแหน่งแล้ว"
+                LlmActionResult(
+                    action = LlmActionJson(action = "IDLE", moveset = "IDLE", reply = reply),
+                    displayReply = reply,
+                    actionBadge = "DIRECTIVE // IDLE"
+                )
+            }
+            lower.contains("เปิด youtube") || lower.contains("open youtube") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "open_app", pkg = "com.google.android.youtube"),
+                    displayReply = "กำลังเปิด YouTube ให้นะครับ",
+                    actionBadge = "OPEN_APP // com.google.android.youtube"
+                )
+            }
+            lower.contains("เปิด chrome") || lower.contains("เปิดเว็บ") || lower.contains("open chrome") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "open_app", pkg = "com.android.chrome"),
+                    displayReply = "เปิด Chrome สำหรับท่องเว็บให้แล้วครับ",
+                    actionBadge = "OPEN_APP // com.android.chrome"
+                )
+            }
+            lower.contains("เปิดกล้อง") || lower.contains("ถ่ายรูป") || lower.contains("camera") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "open_app", pkg = "com.android.camera"),
+                    displayReply = "เปิดกล้องถ่ายรูปให้แล้วครับ",
+                    actionBadge = "OPEN_APP // com.android.camera"
+                )
+            }
+            lower.contains("พิมพ์") || lower.contains("type") || lower.contains("write") -> {
+                val toType = trimmed.replace("(?i)^พิมพ์|^type|^write".toRegex(), "").trim().ifEmpty { trimmed }
+                LlmActionResult(
+                    action = LlmActionJson(action = "input_text", text = toType),
+                    displayReply = "พิมพ์ข้อความ \"$toType\" ลงในช่องแล้วครับ",
+                    actionBadge = "INPUT_TEXT // \"$toType\""
+                )
+            }
+            lower.contains("แตะ") || lower.contains("คลิก") || lower.contains("tap") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "tap", x = 500, y = 800),
+                    displayReply = "เดินไปแตะหน้าจอให้ที่พิกัด [500, 800] เรียบร้อยครับ",
+                    actionBadge = "TAP // (500, 800)"
+                )
+            }
+            lower.contains("ปัด") || lower.contains("เลื่อน") || lower.contains("swipe") || lower.contains("scroll") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "swipe", x1 = 500, y1 = 1200, x2 = 500, y2 = 400),
+                    displayReply = "ปัดหน้าจอเลื่อนขึ้นให้แล้วครับ",
+                    actionBadge = "SWIPE // [500,1200]->[500,400]"
+                )
+            }
+            lower.contains("กลับ") || lower.contains("back") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "back"),
+                    displayReply = "กดย้อนกลับให้แล้วครับ",
+                    actionBadge = "SYSTEM // BACK"
+                )
+            }
+            lower.contains("หน้าหลัก") || lower.contains("home") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "home"),
+                    displayReply = "กลับสู่หน้าโฮมแล้วครับ",
+                    actionBadge = "SYSTEM // HOME"
+                )
+            }
+            lower.contains("ลูบหัว") || lower.contains("pet") || lower.contains("น่ารัก") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "chat", reply = "ขอบคุณที่ลูบหัวนะ กำลังใจเต็มเปี่ยมแล้ว"),
+                    displayReply = "ขอบคุณที่ลูบหัวนะ กำลังใจเต็มเปี่ยมแล้ว",
+                    actionBadge = "INTERACTION // PET_HEAD"
+                )
+            }
+            lower.contains("สวัสดี") || lower.contains("hello") || lower.contains("hi") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "chat", reply = "สวัสดีครับผู้บัญชาการ $petName พร้อมรับคำสั่งแล้วครับ"),
+                    displayReply = "สวัสดีครับผู้บัญชาการ $petName พร้อมรับคำสั่งแล้วครับ",
+                    actionBadge = "CHAT // GREETING"
+                )
+            }
+            lower.contains("ทำอะไรได้") || lower.contains("help") || lower.contains("ช่วยอะไร") -> {
+                LlmActionResult(
+                    action = LlmActionJson(action = "chat", reply = "ผมคือยูนิต $petName สามารถเดินบนหน้าจอ ช่วยเปิดแอป แตะปุ่ม พิมพ์ข้อความ หรืออยู่เป็นเพื่อนคุณได้ครับ"),
+                    displayReply = "ผมคือยูนิต $petName สามารถเดินบนหน้าจอ ช่วยเปิดแอป แตะปุ่ม พิมพ์ข้อความ หรืออยู่เป็นเพื่อนคุณได้ครับ",
+                    actionBadge = "CHAT // CAPABILITIES"
+                )
+            }
+            lower.contains("มีใครบ้าง") || lower.contains("เพื่อน") || lower.contains("ยูนิต") -> {
+                val activeList = CharacterRegistry.getActiveNames()
+                val listStr = if (activeList.isNotEmpty()) activeList.joinToString(", ") else petName
+                LlmActionResult(
+                    action = LlmActionJson(action = "chat", reply = "ขณะนี้มียูนิตที่ปฏิบัติหน้าที่บนหน้าจอทั้งหมด ${activeList.size} ยูนิต ได้แก่: $listStr"),
+                    displayReply = "ขณะนี้มียูนิตที่ปฏิบัติหน้าที่บนหน้าจอทั้งหมด ${activeList.size} ยูนิต ได้แก่: $listStr",
+                    actionBadge = "REGISTRY // UNITS"
+                )
+            }
+            else -> {
+                val genericResponses = listOf(
+                    "รับทราบครับผู้บัญชาการ $petName ได้รับคำสั่ง \"$trimmed\" แล้ว กำลังประมวลผล",
+                    "เข้าใจแล้วครับ ระบบควบคุมเมทริกซ์ของยูนิต $petName พร้อมทำงานตามคำสั่ง",
+                    "ยูนิต $petName ตอบสนองต่อคำสั่ง \"$trimmed\" เรียบร้อยครับ",
+                    "พิกัดและการเคลื่อนไหวของยูนิต $petName ปกติ พร้อมลุยภารกิจร่วมกับคุณแล้วครับ"
+                )
+                val reply = genericResponses.random()
+                LlmActionResult(
+                    action = LlmActionJson(action = "chat", reply = reply),
+                    displayReply = reply,
+                    actionBadge = "CHAT // RESPONSE"
+                )
+            }
         }
+
+        // บันทึก Response ลงใน Context
+        CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${result.displayReply}")
+        result
     }
-
-    suspend fun processUserCommand(
-        input: String,
-        appearance: PetAppearance? = null
-    ): LlmActionJson = withContext(Dispatchers.Default) {
-        val startTime = System.currentTimeMillis()
-        val backend = getActiveBackend()
-        val formattedPrompt = PromptBuilder.formatChatml(input, appearance)
-
-        var rawResult: String? = null
-        try {
-            rawResult = backend.generate(formattedPrompt, maxTokens = 128, temp = 0.7f, repeatPenalty = 1.1f)
-        } catch (e: Exception) {
-            Log.w(TAG, "Backend ${backend.backendName} failed, falling back to smart rule engine", e)
-        }
-
-        if (rawResult.isNullOrBlank() && backend != smartRuleBackend) {
-            rawResult = smartRuleBackend.generate(formattedPrompt)
-        }
-
-        val parsedAction = LlmActionParser.parse(rawResult)
-            ?: smartRuleBackend.processQuery(input)
-
-        val latency = System.currentTimeMillis() - startTime
-
-        _telemetry.value = _telemetry.value.copy(
-            activeBackendName = backend.backendName,
-            activeBackendType = backend.backendType,
-            lastLatencyMs = latency,
-            totalInferences = _telemetry.value.totalInferences + 1,
-            statusMessage = backend.getStatusDetails()
-        )
-
-        parsedAction
-    }
-
-    fun getRandomThought(): String = MISCHIEF_QUOTES.random()
-    fun getRandomPetReply(): String = PETTED_REPLIES.random()
-    fun getRandomFeedReply(): String = FED_REPLIES.random()
 }
+
+data class LlmActionResult(
+    val action: LlmActionJson,
+    val displayReply: String,
+    val actionBadge: String
+)

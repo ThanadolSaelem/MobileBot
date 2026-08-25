@@ -1,0 +1,1 @@
+sed -i 's/startForeground(1, createNotification())/if (Build.VERSION.SDK_INT >= 34) { startForeground(1, createNotification(), 1073741824) } else { startForeground(1, createNotification()) }/' app/src/main/java/com/cfks/goosedroid/OverlayService.kt
