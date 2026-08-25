@@ -1,5 +1,7 @@
 package com.cfks.goosedroid.brain
 
+import android.content.Context
+import com.cfks.goosedroid.ai.AiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -8,13 +10,55 @@ import kotlinx.coroutines.withContext
  * รองรับการแยก Context และความจำเฉพาะของตัวละครแต่ละตัวตามชื่อเฉพาะ
  */
 object PetBrain {
-
-    suspend fun processCommand(userText: String, petName: String = "น้องห่าน"): LlmActionResult = withContext(Dispatchers.Default) {
+    suspend fun processCommand(context: Context, userText: String, petName: String = "Unit"): LlmActionResult = withContext(Dispatchers.Default) {
         val trimmed = userText.trim()
         val lower = trimmed.lowercase()
 
         // บันทึก Log การสั่งการลงใน Context เฉพาะตัวของตัวละครนี้
         CharacterRegistry.addInteractionLog(petName, "USER: $trimmed")
+        
+        try {
+            val aiManager = AiManager(context)
+            val unitInfo = CharacterRegistry.getUnitInfo(petName)
+            val data = unitInfo?.id?.let { CharacterRegistry.getCharacterData(it) }
+            val persona = data?.persona ?: ""
+            val directive = aiManager.getNextAction(trimmed, persona, petName)
+            
+            var finalSpeech = directive.speech ?: "..."
+            
+            // Execute Tool Call if present
+            directive.toolCall?.let { toolCall ->
+                val toolResult = aiManager.toolRegistry.executeTool(context, toolCall.name, toolCall.args)
+                android.util.Log.d("PetBrain", "Tool Result: $toolResult")
+                CharacterRegistry.addInteractionLog(petName, "TOOL RESULT (${toolCall.name}): $toolResult")
+                
+                if (toolResult.startsWith("Server started.")) {
+                    finalSpeech = toolResult.substringAfter("'").substringBeforeLast("'")
+                    if (finalSpeech.isBlank()) finalSpeech = toolResult
+                } else if (toolResult.startsWith("Error")) {
+                    finalSpeech += "\n\n[System Tool Error: $toolResult]"
+                } else if (toolResult.startsWith("Text added to clipboard") || toolResult.startsWith("Screen content retrieved")) {
+                    finalSpeech += "\n\n[System: $toolResult]"
+                }
+            }
+            
+            val result = LlmActionResult(
+                action = LlmActionJson(
+                    action = directive.action,
+                    reply = finalSpeech,
+                    moveset = directive.movesetName,
+                    target_dx = directive.targetDx,
+                    target_dy = directive.targetDy
+                ),
+                displayReply = finalSpeech,
+                actionBadge = "AI // ${directive.action.uppercase()}"
+            )
+            CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${result.displayReply}")
+            return@withContext result
+        } catch (e: Exception) {
+            e.printStackTrace()
+            android.util.Log.e("PetBrain", "AI Call Failed, falling back to local mocks", e)
+        }
 
         // ตรวจสอบ Moveset พิเศษและ Custom Dialogue ที่ผู้ใช้กำหนดไว้ในตัวละครนี้
         val unitInfo = CharacterRegistry.getUnitInfo(petName)

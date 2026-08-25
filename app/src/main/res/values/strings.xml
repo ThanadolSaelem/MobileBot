@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Goose Desktop</string>
+    <string name="accessibility_service_description">Allows Goose Desktop Unit to read screen content to assist you.</string>
 </resources>

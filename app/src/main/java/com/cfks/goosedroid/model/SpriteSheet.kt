@@ -14,6 +14,7 @@ data class AnimationSequence(
 data class SpriteSheetData(
     val id: String = java.util.UUID.randomUUID().toString(),
     var name: String = "New Character",
+    var persona: String = "", // Customizable AI personality / role
     var uri: String? = null,
     var columns: Int = 1,
     var rows: Int = 1,

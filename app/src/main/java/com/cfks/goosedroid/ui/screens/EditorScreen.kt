@@ -98,6 +98,7 @@ fun EditorScreen(
         candidate
     }
     var unitName by remember { mutableStateOf(initialSuggestedName) }
+    var unitPersona by remember { mutableStateOf(editTarget?.spriteSheetData?.persona ?: "") }
 
     // Multi-Moveset State List
     val moveSets = remember(editTarget) {
@@ -346,6 +347,33 @@ fun EditorScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        "UNIT PERSONA / ROLE (AI CORE)",
+                        color = TdsmTextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = unitPersona,
+                        onValueChange = { unitPersona = it },
+                        placeholder = { Text("e.g. You are a sassy robotic cat...", color = TdsmMuted, fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth().height(100.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TdsmTextPrimary,
+                            unfocusedTextColor = TdsmTextPrimary,
+                            focusedBorderColor = TdsmTextPrimary,
+                            unfocusedBorderColor = TdsmBorder,
+                            focusedContainerColor = TdsmSurface,
+                            unfocusedContainerColor = TdsmSurface
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        maxLines = 4
+                    )
                 }
             }
 
@@ -1335,6 +1363,7 @@ fun EditorScreen(
                             spriteSheetData = SpriteSheetData(
                                 id = finalSpriteId,
                                 name = unitName.trim(),
+                                persona = unitPersona.trim(),
                                 uri = firstUri,
                                 columns = baseCols,
                                 rows = baseRows,

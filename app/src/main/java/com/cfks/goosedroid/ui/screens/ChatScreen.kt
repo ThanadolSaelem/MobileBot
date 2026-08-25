@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.cfks.goosedroid.brain.PetBrain
 import com.cfks.goosedroid.ui.theme.*
 import kotlinx.coroutines.delay
@@ -38,6 +39,7 @@ fun ChatScreen(
     characterName: String,
     onNavigateBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
     var isTyping by remember { mutableStateOf(false) }
@@ -230,7 +232,7 @@ fun ChatScreen(
 
                             scope.launch {
                                 delay(350)
-                                val result = PetBrain.processCommand(userMsg, characterName)
+                                val result = PetBrain.processCommand(context, userMsg, characterName)
                                 isTyping = false
                                 messages = messages + ChatMessage(
                                     sender = characterName,

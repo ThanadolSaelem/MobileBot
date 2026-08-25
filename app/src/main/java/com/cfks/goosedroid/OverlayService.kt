@@ -31,7 +31,9 @@ data class OverlayLlmDirective(
     val vy: Float = 0f,
     val durationFrames: Int = 180,
     val targetDx: Float? = null,
-    val targetDy: Float? = null
+    val targetDy: Float? = null,
+    val speech: String? = null,
+    val toolCall: com.cfks.goosedroid.ai.ToolCall? = null
 )
 
 class OverlayService : Service() {
@@ -40,6 +42,7 @@ class OverlayService : Service() {
         const val ACTION_SPAWN = "com.cfks.goosedroid.ACTION_SPAWN"
         const val ACTION_REMOVE = "com.cfks.goosedroid.ACTION_REMOVE"
         const val ACTION_REMOVE_ALL = "com.cfks.goosedroid.ACTION_REMOVE_ALL"
+        const val ACTION_RECEIVE_SHARE = "com.cfks.goosedroid.ACTION_RECEIVE_SHARE"
         const val MAX_OVERLAY_UNITS = 10
     }
 
@@ -65,6 +68,22 @@ class OverlayService : Service() {
         } else {
             startForeground(1, createNotification())
         }
+
+        // WebDropZone Callback
+        com.cfks.goosedroid.server.WebDropZoneServer.onFileReceived = { file ->
+            mainHandler.post {
+                activeUnits.values.firstOrNull()?.let { unit ->
+                    unit.speechBubbleView.visibility = View.VISIBLE
+                    unit.speechBubbleView.text = "File received: ${file.name}\nSize: ${file.length() / 1024} KB"
+                    com.cfks.goosedroid.brain.CharacterRegistry.addInteractionLog(unit.name, "SYSTEM: Received file from Drop Zone: ${file.name}")
+                    
+                    // Auto-hide bubble after 5 seconds
+                    mainHandler.postDelayed({
+                        if (!unit.isChatOpen) unit.speechBubbleView.visibility = View.GONE
+                    }, 5000)
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -78,6 +97,18 @@ class OverlayService : Service() {
             ACTION_REMOVE_ALL -> {
                 removeAllUnits()
                 stopSelf()
+            }
+            ACTION_RECEIVE_SHARE -> {
+                val sharedText = intent.getStringExtra("shared_text")
+                if (sharedText != null && activeUnits.isNotEmpty()) {
+                    val unit = activeUnits.values.first()
+                    unit.speechBubbleView.visibility = View.VISIBLE
+                    unit.speechBubbleView.text = "Received shared content!"
+                    com.cfks.goosedroid.brain.CharacterRegistry.addInteractionLog(unit.name, "SYSTEM: Received Shared Content - $sharedText")
+                    mainHandler.postDelayed({
+                        if (!unit.isChatOpen) unit.speechBubbleView.visibility = View.GONE
+                    }, 5000)
+                }
             }
             else -> {
                 // Default or ACTION_SPAWN
@@ -309,7 +340,11 @@ class OverlayService : Service() {
             var wasDragging = false
 
             while (isActive) {
-                delay(16)
+                val isCompletelyIdle = behaviorState == "IDLE" && currentVx == 0f && currentVy == 0f && !isJumping && controller.activeLlmDirective == null
+                val frameDelay = if (isCompletelyIdle && !controller.isDragging && !controller.isChatOpen) 160L else 16L
+                delay(frameDelay)
+                
+                val timerDecrement = if (frameDelay == 160L) 10 else 1
                 
                 if (controller.isDragging || controller.isChatOpen) {
                     wasDragging = true
@@ -335,7 +370,7 @@ class OverlayService : Service() {
                 // 1. CHECK ACTIVE LLM DIRECTIVE
                 val activeLlm = controller.activeLlmDirective
                 if (activeLlm != null && controller.llmDirectiveTimer > 0) {
-                    controller.llmDirectiveTimer--
+                    controller.llmDirectiveTimer -= timerDecrement
                     
                     // Setup initial state for LLM directive if just starting
                     if (behaviorState != activeLlm.action && behaviorState != activeLlm.movesetName) {
@@ -400,7 +435,7 @@ class OverlayService : Service() {
                                 currentVx = 0f
                             }
                         } else {
-                            behaviorTimer--
+                            behaviorTimer -= timerDecrement
 
                             if (behaviorTimer <= 0) {
                                 val availableBehaviors = com.cfks.goosedroid.model.MovesetMatcher.getAvailableAutonomousBehaviors(spriteData?.moveSets ?: emptyList())
@@ -765,66 +800,66 @@ class OverlayService : Service() {
 
                     serviceScope.launch {
                         delay(250)
-                        val result = PetBrain.processCommand(query, unit.name)
+                        val result = com.cfks.goosedroid.brain.PetBrain.processCommand(this@OverlayService, query, unit.name)
                         assistantBubble.text = result.displayReply
 
                         // LLM DIRECTIVE DISPATCH: High priority override on character
-                        when (result.action.action.lowercase()) {
-                            "walk" -> {
-                                val dir = if (listOf(true, false).random()) 1.8f else -1.8f
-                                unit.activeLlmDirective = OverlayLlmDirective("WALK", vx = dir, durationFrames = 220, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
-                                unit.llmDirectiveTimer = 220
-                            }
-                            "run" -> {
-                                val dir = if (listOf(true, false).random()) 3.5f else -3.5f
-                                unit.activeLlmDirective = OverlayLlmDirective("RUN", vx = dir, durationFrames = 180, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
-                                unit.llmDirectiveTimer = 180
-                            }
-                            "jump" -> {
-                                val dir = if (listOf(true, false).random()) 1.5f else -1.5f
-                                unit.activeLlmDirective = OverlayLlmDirective("JUMP", vy = -12f, vx = dir, durationFrames = 90, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
-                                unit.llmDirectiveTimer = 90
-                            }
-                            "idle" -> {
-                                unit.activeLlmDirective = OverlayLlmDirective("IDLE", vx = 0f, vy = 0f, durationFrames = 300)
-                                unit.llmDirectiveTimer = 300
-                            }
-                            "custom_action" -> {
-                                val mName = result.action.moveset
-                                unit.activeLlmDirective = OverlayLlmDirective("CUSTOM", movesetName = mName, durationFrames = 180)
-                                unit.llmDirectiveTimer = 180
-                            }
-                            else -> {
-                                if (result.action.moveset != null) {
-                                    unit.activeLlmDirective = OverlayLlmDirective("CUSTOM", movesetName = result.action.moveset, durationFrames = 150)
-                                    unit.llmDirectiveTimer = 150
+                            when (result.action.action.lowercase()) {
+                                "walk" -> {
+                                    val dir = if (listOf(true, false).random()) 1.8f else -1.8f
+                                    unit.activeLlmDirective = OverlayLlmDirective("WALK", vx = dir, durationFrames = 220, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
+                                    unit.llmDirectiveTimer = 220
                                 }
-                            }
-                        }
-
-                        // Execute Android system action if requested
-                        when (result.action.action) {
-                            "open_app" -> {
-                                result.action.pkg?.let { pkg ->
-                                    val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
-                                    if (launchIntent != null) {
-                                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        startActivity(launchIntent)
+                                "run" -> {
+                                    val dir = if (listOf(true, false).random()) 3.5f else -3.5f
+                                    unit.activeLlmDirective = OverlayLlmDirective("RUN", vx = dir, durationFrames = 180, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
+                                    unit.llmDirectiveTimer = 180
+                                }
+                                "jump" -> {
+                                    val dir = if (listOf(true, false).random()) 1.5f else -1.5f
+                                    unit.activeLlmDirective = OverlayLlmDirective("JUMP", vy = -12f, vx = dir, durationFrames = 90, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
+                                    unit.llmDirectiveTimer = 90
+                                }
+                                "idle" -> {
+                                    unit.activeLlmDirective = OverlayLlmDirective("IDLE", vx = 0f, vy = 0f, durationFrames = 300)
+                                    unit.llmDirectiveTimer = 300
+                                }
+                                "custom_action" -> {
+                                    val mName = result.action.moveset
+                                    unit.activeLlmDirective = OverlayLlmDirective("CUSTOM", movesetName = mName, durationFrames = 180)
+                                    unit.llmDirectiveTimer = 180
+                                }
+                                else -> {
+                                    if (result.action.moveset != null) {
+                                        unit.activeLlmDirective = OverlayLlmDirective("CUSTOM", movesetName = result.action.moveset, durationFrames = 150)
+                                        unit.llmDirectiveTimer = 150
                                     }
                                 }
                             }
-                            "home" -> {
-                                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                                    addCategory(Intent.CATEGORY_HOME)
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+
+                            // Execute Android system action if requested
+                            when (result.action.action) {
+                                "open_app" -> {
+                                    result.action.pkg?.let { pkg ->
+                                        val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+                                        if (launchIntent != null) {
+                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            startActivity(launchIntent)
+                                        }
+                                    }
                                 }
-                                startActivity(homeIntent)
+                                "home" -> {
+                                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                                        addCategory(Intent.CATEGORY_HOME)
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    startActivity(homeIntent)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
         inputBar.addView(inputEditText)
         inputBar.addView(sendBtn)

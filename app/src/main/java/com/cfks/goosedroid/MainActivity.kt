@@ -22,6 +22,8 @@ import androidx.navigation.NavType
 import com.cfks.goosedroid.ui.screens.ChatScreen
 import com.cfks.goosedroid.ui.screens.EditorScreen
 import com.cfks.goosedroid.ui.screens.PlaygroundScreen
+import com.cfks.goosedroid.ui.screens.AiSettingsScreen
+import com.cfks.goosedroid.ui.screens.ModelHubScreen
 import com.cfks.goosedroid.ui.theme.GooseDesktopTheme
 import com.cfks.goosedroid.ui.viewmodel.MainViewModel
 
@@ -31,6 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkPermissions()
+        handleIntent(intent)
         setContent {
             GooseDesktopTheme {
                 Surface(
@@ -39,6 +42,29 @@ class MainActivity : ComponentActivity() {
                 ) {
                     AppNavigation(mainViewModel, this)
                 }
+            }
+        }
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND) {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            val sharedUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            
+            val contentToSend = sharedText ?: sharedUri?.toString()
+            
+            if (contentToSend != null) {
+                val serviceIntent = Intent(this, OverlayService::class.java).apply {
+                    action = OverlayService.ACTION_RECEIVE_SHARE
+                    putExtra("shared_text", contentToSend)
+                }
+                startForegroundService(serviceIntent)
+                finish() // Close the activity after sharing to keep it running in the background
             }
         }
     }
@@ -57,6 +83,7 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
         composable("playground") {
             PlaygroundScreen(
                 viewModel = viewModel,
+                onNavigateToSettings = { navController.navigate("settings") },
                 onNavigateToEditor = { charId -> 
                     if (charId != null) {
                         navController.navigate("editor?id=$charId")
@@ -108,6 +135,12 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
                     navController.popBackStack()
                 }
             )
+        }
+        composable("settings") {
+            AiSettingsScreen(navController = navController)
+        }
+        composable("model_hub") {
+            ModelHubScreen(navController = navController)
         }
         composable("chat/{name}") { backStackEntry ->
             val name = backStackEntry.arguments?.getString("name") ?: "Character"

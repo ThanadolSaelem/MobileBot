@@ -25,6 +25,7 @@ object CharacterRepository {
                 val spriteObj = JSONObject()
                 val sprite = char.spriteSheetData
                 spriteObj.put("name", sprite.name)
+                spriteObj.put("persona", sprite.persona)
                 spriteObj.put("uri", sprite.uri)
                 spriteObj.put("columns", sprite.columns)
                 spriteObj.put("rows", sprite.rows)
@@ -93,6 +94,7 @@ object CharacterRepository {
                 val spriteData = SpriteSheetData(
                     id = if (spriteObj.has("id")) spriteObj.getString("id") else java.util.UUID.randomUUID().toString(),
                     name = spriteObj.getString("name"),
+                    persona = spriteObj.optString("persona", ""),
                     uri = if (spriteObj.has("uri") && !spriteObj.isNull("uri")) spriteObj.getString("uri") else null,
                     columns = spriteObj.getInt("columns"),
                     rows = spriteObj.getInt("rows"),

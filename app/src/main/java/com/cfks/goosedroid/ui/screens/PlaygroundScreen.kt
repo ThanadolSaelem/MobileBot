@@ -85,6 +85,7 @@ enum class ChatDialogState {
 fun PlaygroundScreen(
     viewModel: MainViewModel,
     onNavigateToEditor: (String?) -> Unit,
+    onNavigateToSettings: () -> Unit,
     onNavigateToChat: (String) -> Unit,
     onLaunchOverlay: (PhysicsCharacter) -> Unit
 ) {
@@ -178,7 +179,18 @@ fun PlaygroundScreen(
     // Physics Engine Loop: Drag Priority > LLM Directives > Autonomous Random Roll Fallback
     LaunchedEffect(chatDialogState, boxWidth, boxHeight) {
         while (chatDialogState == ChatDialogState.IDLE) {
-            delay(16) // ~60fps
+            val allIdle = physicsCharacters.all { char -> 
+                !char.isDragging && 
+                behaviorStateMap[char.id] == "IDLE" && 
+                char.vx == 0f && char.vy == 0f &&
+                llmDirectiveMap[char.id] == null
+            }
+            
+            val frameDelay = if (allIdle && physicsCharacters.isNotEmpty()) 160L else 16L
+            delay(frameDelay)
+            
+            val timerDecrement = if (frameDelay == 160L) 10 else 1
+            
             if (boxWidth > 0 && boxHeight > 0) {
                 val groundY = (boxHeight - charSizePx - 100f).coerceAtLeast(80f)
                 val ceilingY = 80f
@@ -197,7 +209,7 @@ fun PlaygroundScreen(
 
                         // 2. CHECK ACTIVE LLM DIRECTIVE
                         val activeLlmDirective = llmDirectiveMap[char.id]
-                        val llmTimer = (llmDirectiveTimerMap[char.id] ?: 0) - 1
+                        val llmTimer = (llmDirectiveTimerMap[char.id] ?: 0) - timerDecrement
 
                         if (activeLlmDirective != null && llmTimer > 0) {
                             // === EXECUTING ACTIVE LLM COMMAND ===
@@ -298,7 +310,7 @@ fun PlaygroundScreen(
                                 y = groundY
                                 vy = 0f
 
-                                val currentTimer = (behaviorTimerMap[char.id] ?: 0) - 1
+                                val currentTimer = (behaviorTimerMap[char.id] ?: 0) - timerDecrement
                                 var currentState = behaviorStateMap[char.id] ?: "IDLE"
 
                                 if (currentTimer <= 0) {
@@ -928,6 +940,20 @@ fun PlaygroundScreen(
                     )
                 }
 
+                // AI Settings Button
+                IconButton(
+                    onClick = { onNavigateToSettings() },
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        Icons.Default.SmartToy,
+                        contentDescription = "AI Settings",
+                        tint = TdsmTextPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+
                 // Studio Editor Button
                 IconButton(
                     onClick = { onNavigateToEditor(null) },
@@ -1299,7 +1325,7 @@ fun PlaygroundScreen(
 
                                             scope.launch {
                                                 delay(250)
-                                                val result = PetBrain.processCommand(query, char.spriteSheetData.name)
+                                                val result = PetBrain.processCommand(context, query, char.spriteSheetData.name)
                                                 isAssistantTyping = false
                                                 assistantBubbleText = "${char.spriteSheetData.name}: ${result.displayReply}"
 
