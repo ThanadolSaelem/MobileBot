@@ -306,22 +306,39 @@ class OverlayService : Service() {
             var behaviorTimer = (100..200).random()
             var isJumping = false
             var jumpGroundY = currentY
+            var wasDragging = false
 
             while (isActive) {
                 delay(16)
-                if (!controller.isDragging && !controller.isChatOpen) {
-                    val currentBounds = windowManager.currentWindowMetrics.bounds
-                    val maxX = (currentBounds.width() - overlayWidth).toFloat().coerceAtLeast(0f)
-                    val maxY = (currentBounds.height() - overlayHeight).toFloat().coerceAtLeast(0f)
-                    val minY = 40f
+                
+                if (controller.isDragging || controller.isChatOpen) {
+                    wasDragging = true
+                    continue
+                }
 
-                    // 1. CHECK ACTIVE LLM DIRECTIVE
-                    val activeLlm = controller.activeLlmDirective
-                    if (activeLlm != null && controller.llmDirectiveTimer > 0) {
-                        controller.llmDirectiveTimer--
-                        
-                        // Setup initial state for LLM directive if just starting
-                        if (behaviorState != activeLlm.action && behaviorState != activeLlm.movesetName) {
+                if (wasDragging) {
+                    currentX = params.x.toFloat()
+                    currentY = params.y.toFloat()
+                    isJumping = false
+                    controller.activeLlmDirective = null
+                    behaviorState = "IDLE"
+                    currentVx = 0f
+                    currentVy = 0f
+                    wasDragging = false
+                }
+
+                val currentBounds = windowManager.currentWindowMetrics.bounds
+                val maxX = (currentBounds.width() - overlayWidth).toFloat().coerceAtLeast(0f)
+                val maxY = (currentBounds.height() - overlayHeight).toFloat().coerceAtLeast(0f)
+                val minY = 40f
+
+                // 1. CHECK ACTIVE LLM DIRECTIVE
+                val activeLlm = controller.activeLlmDirective
+                if (activeLlm != null && controller.llmDirectiveTimer > 0) {
+                    controller.llmDirectiveTimer--
+                    
+                    // Setup initial state for LLM directive if just starting
+                    if (behaviorState != activeLlm.action && behaviorState != activeLlm.movesetName) {
                             val actionName = activeLlm.movesetName ?: activeLlm.action
                             behaviorState = actionName
                             charView.currentMovesetName = actionName
@@ -469,14 +486,7 @@ class OverlayService : Service() {
                     try {
                         windowManager.updateViewLayout(container, params)
                     } catch (e: Exception) {}
-                } else if (controller.isDragging) {
-                    currentX = params.x.toFloat()
-                    currentY = params.y.toFloat()
-                    currentVx = 0f
-                    currentVy = 0f
-                    charView.isDragging = true
-                    charView.invalidate()
-                }
+                // Loop ends here naturally
             }
         }
 
@@ -1117,8 +1127,20 @@ class CompanionCharacterView(
 
             val dstRect = Rect(20, (20 + jumpOffsetY).toInt(), width - 20, (height - 20 + jumpOffsetY).toInt())
 
+            var applyFlip = facingLeft
+            if (activeMoveset != null) {
+                val name = activeMoveset.name.lowercase()
+                val hasLeft = name.contains("left") || name.contains("ซ้าย")
+                val hasRight = name.contains("right") || name.contains("ขวา")
+                if (hasLeft && !hasRight) {
+                    applyFlip = !facingLeft
+                } else if (hasRight && !hasLeft) {
+                    applyFlip = facingLeft
+                }
+            }
+
             canvas.save()
-            if (facingLeft) {
+            if (applyFlip) {
                 canvas.scale(-1f, 1f, cx, cy)
             }
             canvas.drawBitmap(drawBitmap, srcRect, dstRect, paint)

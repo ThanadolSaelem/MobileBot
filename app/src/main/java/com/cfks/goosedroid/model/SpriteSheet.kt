@@ -28,7 +28,8 @@ data class PhysicsCharacter(
     var vx: Float = 0f,
     var vy: Float = 0f,
     var isDragging: Boolean = false,
-    var currentMovesetName: String? = null
+    var currentMovesetName: String? = null,
+    var facingLeft: Boolean = false
 )
 
 object MovesetMatcher {
@@ -226,57 +227,75 @@ object MovesetMatcher {
         // Diagonal
         if (isMovingUp && isMovingLeft) {
             val upLeft = candidates.firstOrNull {
-                it.name.contains("upleft", true) || it.name.contains("up-left", true) || it.name.contains("topleft", true)
+                val n = it.name.lowercase().replace("_", "").replace("-", "")
+                n.contains("upleft") || n.contains("topleft")
             }
             if (upLeft != null) return upLeft
         }
         if (isMovingUp && isMovingRight) {
             val upRight = candidates.firstOrNull {
-                it.name.contains("upright", true) || it.name.contains("up-right", true) || it.name.contains("topright", true)
+                val n = it.name.lowercase().replace("_", "").replace("-", "")
+                n.contains("upright") || n.contains("topright")
             }
             if (upRight != null) return upRight
         }
         if (isMovingDown && isMovingLeft) {
             val downLeft = candidates.firstOrNull {
-                it.name.contains("downleft", true) || it.name.contains("down-left", true) || it.name.contains("bottomleft", true)
+                val n = it.name.lowercase().replace("_", "").replace("-", "")
+                n.contains("downleft") || n.contains("bottomleft")
             }
             if (downLeft != null) return downLeft
         }
         if (isMovingDown && isMovingRight) {
             val downRight = candidates.firstOrNull {
-                it.name.contains("downright", true) || it.name.contains("down-right", true) || it.name.contains("bottomright", true)
+                val n = it.name.lowercase().replace("_", "").replace("-", "")
+                n.contains("downright") || n.contains("bottomright")
             }
             if (downRight != null) return downRight
         }
 
         // 4-way direction priorities if no diagonal or not moving diagonally
-        if (isMovingUp) {
-            val up = candidates.firstOrNull {
-                it.name.contains("up", true) || it.name.contains("back", true) || it.name.contains("top", true) || it.name.contains("หลัง", true)
+        val dominantX = kotlin.math.abs(vx) > kotlin.math.abs(vy)
+
+        val checkHorizontal: () -> AnimationSequence? = {
+            if (facingLeft || isMovingLeft) {
+                candidates.firstOrNull {
+                    it.name.contains("left", true) || it.name.contains("side", true) ||
+                            it.name.contains("ซ้าย", true) || it.name.contains("ข้าง", true)
+                }
+            } else {
+                candidates.firstOrNull {
+                    it.name.contains("right", true) || it.name.contains("side", true) ||
+                            it.name.contains("ขวา", true) || it.name.contains("ข้าง", true)
+                }
             }
-            if (up != null) return up
-        }
-        
-        if (isMovingDown) {
-            val down = candidates.firstOrNull {
-                it.name.contains("down", true) || it.name.contains("front", true) || it.name.contains("bottom", true) || it.name.contains("หน้า", true)
-            }
-            if (down != null) return down
         }
 
-        // Left / Right default matching
-        if (facingLeft || isMovingLeft) {
-            val left = candidates.firstOrNull {
-                it.name.contains("left", true) || it.name.contains("side", true) ||
-                        it.name.contains("ซ้าย", true) || it.name.contains("ข้าง", true)
+        val checkVertical: () -> AnimationSequence? = {
+            var vMatch: AnimationSequence? = null
+            if (isMovingUp) {
+                vMatch = candidates.firstOrNull {
+                    it.name.contains("up", true) || it.name.contains("back", true) || it.name.contains("top", true) || it.name.contains("หลัง", true)
+                }
             }
-            if (left != null) return left
-        } else if (isMovingRight || !facingLeft) {
-            val right = candidates.firstOrNull {
-                it.name.contains("right", true) || it.name.contains("side", true) ||
-                        it.name.contains("ขวา", true) || it.name.contains("ข้าง", true)
+            if (vMatch == null && isMovingDown) {
+                vMatch = candidates.firstOrNull {
+                    it.name.contains("down", true) || it.name.contains("front", true) || it.name.contains("bottom", true) || it.name.contains("หน้า", true)
+                }
             }
-            if (right != null) return right
+            vMatch
+        }
+
+        if (dominantX) {
+            val h = checkHorizontal()
+            if (h != null) return h
+            val v = checkVertical()
+            if (v != null) return v
+        } else {
+            val v = checkVertical()
+            if (v != null) return v
+            val h = checkHorizontal()
+            if (h != null) return h
         }
 
         // Check front / default fallback

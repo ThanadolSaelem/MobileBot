@@ -57,7 +57,13 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
         composable("playground") {
             PlaygroundScreen(
                 viewModel = viewModel,
-                onNavigateToEditor = { navController.navigate("editor") },
+                onNavigateToEditor = { charId -> 
+                    if (charId != null) {
+                        navController.navigate("editor?id=$charId")
+                    } else {
+                        navController.navigate("editor")
+                    }
+                },
                 onNavigateToChat = { name -> navController.navigate("chat/$name") },
                 onLaunchOverlay = { character ->
                     if (Settings.canDrawOverlays(activity)) {

@@ -48,7 +48,23 @@ data class ActionPreset(
 val DEFAULT_ACTION_PRESETS = listOf(
     ActionPreset("IDLE", "MOVEMENT", "ยืนนิ่งรอบัญชาการ หรือพร้อมรับคำสั่งจากผู้ใช้", "พร้อมรับคำสั่งครับ!"),
     ActionPreset("WALK", "MOVEMENT", "เดินสำรวจหน้าจอ ลาดตระเวนรอบพื้นที่", "กำลังเดินลาดตระเวนครับ"),
+    ActionPreset("WALK_UP", "MOVEMENT", "เดินขึ้นด้านบน", "เดินขึ้นบนครับ"),
+    ActionPreset("WALK_DOWN", "MOVEMENT", "เดินลงด้านล่าง", "เดินลงล่างครับ"),
+    ActionPreset("WALK_LEFT", "MOVEMENT", "เดินไปทางซ้าย", "เดินซ้ายครับ"),
+    ActionPreset("WALK_RIGHT", "MOVEMENT", "เดินไปทางขวา", "เดินขวาครับ"),
+    ActionPreset("WALK_UP_LEFT", "MOVEMENT", "เดินเฉียงขึ้นไปทางซ้าย", "เดินเฉียงซ้ายบนครับ"),
+    ActionPreset("WALK_UP_RIGHT", "MOVEMENT", "เดินเฉียงขึ้นไปทางขวา", "เดินเฉียงขวาบนครับ"),
+    ActionPreset("WALK_DOWN_LEFT", "MOVEMENT", "เดินเฉียงลงไปทางซ้าย", "เดินเฉียงซ้ายล่างครับ"),
+    ActionPreset("WALK_DOWN_RIGHT", "MOVEMENT", "เดินเฉียงลงไปทางขวา", "เดินเฉียงขวาล่างครับ"),
     ActionPreset("RUN", "MOVEMENT", "วิ่งอย่างรวดเร็ว ตอบสนองอย่างคล่องแคล่ว", "วิ่งด้วยความเร็วสูง!"),
+    ActionPreset("RUN_UP", "MOVEMENT", "วิ่งขึ้นด้านบน", "วิ่งขึ้นบน!"),
+    ActionPreset("RUN_DOWN", "MOVEMENT", "วิ่งลงด้านล่าง", "วิ่งลงล่าง!"),
+    ActionPreset("RUN_LEFT", "MOVEMENT", "วิ่งไปทางซ้าย", "วิ่งซ้าย!"),
+    ActionPreset("RUN_RIGHT", "MOVEMENT", "วิ่งไปทางขวา", "วิ่งขวา!"),
+    ActionPreset("RUN_UP_LEFT", "MOVEMENT", "วิ่งเฉียงขึ้นไปทางซ้าย", "วิ่งเฉียงซ้ายบน!"),
+    ActionPreset("RUN_UP_RIGHT", "MOVEMENT", "วิ่งเฉียงขึ้นไปทางขวา", "วิ่งเฉียงขวาบน!"),
+    ActionPreset("RUN_DOWN_LEFT", "MOVEMENT", "วิ่งเฉียงลงไปทางซ้าย", "วิ่งเฉียงซ้ายล่าง!"),
+    ActionPreset("RUN_DOWN_RIGHT", "MOVEMENT", "วิ่งเฉียงลงไปทางขวา", "วิ่งเฉียงขวาล่าง!"),
     ActionPreset("JUMP", "MOVEMENT", "กระโดดข้ามสิ่งกีดขวางหรือดีใจ", "ฮึบ! กระโดดแล้วนะ"),
     ActionPreset("ATTACK", "COMBAT & ACTION", "โจมตี ข่มขู่ หรือต่อสู้เมื่อมีคำสั่งโจมตี", "ย๊ากก! รับการโจมตีไปซะ!"),
     ActionPreset("DEFEND", "COMBAT & ACTION", "ตั้งการ์ดป้องกันตัว หรือหลบภัย", "เปิดโหมดป้องกันตัว!"),
@@ -178,12 +194,12 @@ fun EditorScreen(
     }
 
     // Unique Name Validation
-    val isDuplicateName by remember(unitName, existingNames) {
+    val isDuplicateName by remember(unitName, existingNames, editTarget) {
         derivedStateOf {
             val clean = unitName.trim().lowercase()
             clean.isNotEmpty() && (
                 existingNames.any { it.trim().lowercase() == clean } ||
-                com.cfks.goosedroid.brain.CharacterRegistry.isNameTaken(clean)
+                com.cfks.goosedroid.brain.CharacterRegistry.isNameTaken(clean, editTarget?.id)
             )
         }
     }
@@ -924,6 +940,56 @@ fun EditorScreen(
                                                         Text("IMPORT", color = TdsmTextPrimary, fontSize = 8.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
+                                                val copyCandidates = moveSets.filter { it.uri != null && it != currentMoveset }
+                                                if (copyCandidates.isNotEmpty()) {
+                                                    var isCopyMenuExpanded by remember { mutableStateOf(false) }
+                                                    Box {
+                                                        Surface(
+                                                            modifier = Modifier
+                                                                .height(28.dp)
+                                                                .clickable { isCopyMenuExpanded = true },
+                                                            color = Color(0xDD111111),
+                                                            shape = RoundedCornerShape(4.dp),
+                                                            border = BorderStroke(1.dp, TdsmBorderLight)
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 8.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.ContentCopy,
+                                                                    contentDescription = "Copy",
+                                                                    tint = TdsmTextPrimary,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(4.dp))
+                                                                Text("COPY", color = TdsmTextPrimary, fontSize = 8.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                                            }
+                                                        }
+                                                        DropdownMenu(
+                                                            expanded = isCopyMenuExpanded,
+                                                            onDismissRequest = { isCopyMenuExpanded = false },
+                                                            modifier = Modifier
+                                                                .background(Color(0xFF161616))
+                                                                .border(1.dp, TdsmBorderLight, RoundedCornerShape(8.dp))
+                                                        ) {
+                                                            copyCandidates.forEach { candidate ->
+                                                                DropdownMenuItem(
+                                                                    text = { Text(candidate.name.uppercase(), color = TdsmTextPrimary, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+                                                                    onClick = {
+                                                                        isCopyMenuExpanded = false
+                                                                        moveSets[safeIndex] = currentMoveset.copy(
+                                                                            uri = candidate.uri,
+                                                                            columns = candidate.columns,
+                                                                            rows = candidate.rows,
+                                                                            frames = candidate.frames
+                                                                        )
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     } else {
@@ -974,23 +1040,44 @@ fun EditorScreen(
                                                     Text("IMPORT FOR ${currentMoveset.name.uppercase()}", fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                                 }
 
-                                                if (baseMoveset != null && baseMoveset.uri != null && baseMoveset != currentMoveset) {
-                                                    OutlinedButton(
-                                                        onClick = {
-                                                            moveSets[safeIndex] = currentMoveset.copy(
-                                                                uri = baseMoveset.uri,
-                                                                columns = baseMoveset.columns,
-                                                                rows = baseMoveset.rows,
-                                                                frames = baseMoveset.frames
-                                                            )
-                                                        },
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        border = BorderStroke(1.dp, TdsmBorderLight),
-                                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TdsmTextPrimary),
-                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                                        modifier = Modifier.height(36.dp)
-                                                    ) {
-                                                        Text("COPY FROM ${baseMoveset.name.uppercase()}", fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                                val copyCandidates = moveSets.filter { it.uri != null && it != currentMoveset }
+                                                if (copyCandidates.isNotEmpty()) {
+                                                    var isCopyMenuExpanded by remember { mutableStateOf(false) }
+                                                    Box {
+                                                        OutlinedButton(
+                                                            onClick = { isCopyMenuExpanded = true },
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            border = BorderStroke(1.dp, TdsmBorderLight),
+                                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TdsmTextPrimary),
+                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                                            modifier = Modifier.height(36.dp)
+                                                        ) {
+                                                            Text("COPY FROM...", fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Moveset", modifier = Modifier.size(14.dp))
+                                                        }
+                                                        DropdownMenu(
+                                                            expanded = isCopyMenuExpanded,
+                                                            onDismissRequest = { isCopyMenuExpanded = false },
+                                                            modifier = Modifier
+                                                                .background(Color(0xFF161616))
+                                                                .border(1.dp, TdsmBorderLight, RoundedCornerShape(8.dp))
+                                                        ) {
+                                                            copyCandidates.forEach { candidate ->
+                                                                DropdownMenuItem(
+                                                                    text = { Text(candidate.name.uppercase(), color = TdsmTextPrimary, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+                                                                    onClick = {
+                                                                        isCopyMenuExpanded = false
+                                                                        moveSets[safeIndex] = currentMoveset.copy(
+                                                                            uri = candidate.uri,
+                                                                            columns = candidate.columns,
+                                                                            rows = candidate.rows,
+                                                                            frames = candidate.frames
+                                                                        )
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }

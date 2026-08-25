@@ -105,13 +105,15 @@ class MainViewModel(application: android.app.Application) : androidx.lifecycle.A
         _physicsCharacters.update { list ->
             list.map {
                 if (it.id == id) {
+                    val newFacingLeft = if (vx < -0.1f) true else if (vx > 0.1f) false else it.facingLeft
                     it.copy(
                         x = x,
                         y = y,
                         vx = vx,
                         vy = vy,
                         isDragging = isDragging,
-                        currentMovesetName = currentMovesetName ?: it.currentMovesetName
+                        currentMovesetName = currentMovesetName ?: it.currentMovesetName,
+                        facingLeft = newFacingLeft
                     )
                 } else it
             }

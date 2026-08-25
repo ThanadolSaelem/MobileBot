@@ -70,7 +70,9 @@ data class LlmDirective(
     val movesetName: String? = null,
     val vx: Float = 0f,
     val vy: Float = 0f,
-    val durationFrames: Int = 180
+    val durationFrames: Int = 180,
+    val targetDx: Float? = null,
+    val targetDy: Float? = null
 )
 
 enum class ChatDialogState {
@@ -229,16 +231,21 @@ fun PlaygroundScreen(
                                         vy = 0f
                                     }
                                     "WALK" -> {
-                                        vx = if (activeLlmDirective.vx != 0f) activeLlmDirective.vx else 1.8f
+                                        val frames = activeLlmDirective.durationFrames.toFloat().coerceAtLeast(1f)
+                                        vx = activeLlmDirective.targetDx?.let { it / frames } ?: (if (activeLlmDirective.vx != 0f) activeLlmDirective.vx else 1.8f)
                                         vy = 0f
                                     }
                                     "RUN" -> {
-                                        vx = if (activeLlmDirective.vx != 0f) activeLlmDirective.vx else 3.5f
+                                        val frames = activeLlmDirective.durationFrames.toFloat().coerceAtLeast(1f)
+                                        vx = activeLlmDirective.targetDx?.let { it / frames } ?: (if (activeLlmDirective.vx != 0f) activeLlmDirective.vx else 3.5f)
                                         vy = 0f
                                     }
                                     "JUMP" -> {
-                                        vy = -12f
-                                        vx = if (activeLlmDirective.vx != 0f) activeLlmDirective.vx else 1.5f
+                                        val frames = activeLlmDirective.durationFrames.toFloat().coerceAtLeast(1f)
+                                        val tDx = activeLlmDirective.targetDx ?: (if (activeLlmDirective.vx != 0f) activeLlmDirective.vx * 60f else 90f)
+                                        val tDy = activeLlmDirective.targetDy ?: -150f
+                                        vy = (tDy - 0.5f * gravity * frames * frames) / frames
+                                        vx = tDx / frames
                                         y += vy
                                     }
                                     else -> { // "CUSTOM" / specific moveset
@@ -1300,17 +1307,17 @@ fun PlaygroundScreen(
                                                 when (result.action.action.lowercase()) {
                                                     "walk" -> {
                                                         val dir = if (listOf(true, false).random()) 1.8f else -1.8f
-                                                        llmDirectiveMap[char.id] = LlmDirective("WALK", vx = dir, durationFrames = 220)
+                                                        llmDirectiveMap[char.id] = LlmDirective("WALK", vx = dir, durationFrames = 220, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
                                                         llmDirectiveTimerMap[char.id] = 220
                                                     }
                                                     "run" -> {
                                                         val dir = if (listOf(true, false).random()) 3.5f else -3.5f
-                                                        llmDirectiveMap[char.id] = LlmDirective("RUN", vx = dir, durationFrames = 180)
+                                                        llmDirectiveMap[char.id] = LlmDirective("RUN", vx = dir, durationFrames = 180, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
                                                         llmDirectiveTimerMap[char.id] = 180
                                                     }
                                                     "jump" -> {
                                                         val dir = if (listOf(true, false).random()) 1.5f else -1.5f
-                                                        llmDirectiveMap[char.id] = LlmDirective("JUMP", vy = -12f, vx = dir, durationFrames = 90)
+                                                        llmDirectiveMap[char.id] = LlmDirective("JUMP", vy = -12f, vx = dir, durationFrames = 90, targetDx = result.action.target_dx, targetDy = result.action.target_dy)
                                                         llmDirectiveTimerMap[char.id] = 90
                                                     }
                                                     "idle" -> {
@@ -1361,7 +1368,7 @@ fun SpriteCharacterView(char: PhysicsCharacter, modifier: Modifier) {
 
     LaunchedEffect(char.vx, char.vy, char.isDragging, char.currentMovesetName) {
         val moves = char.spriteSheetData.moveSets
-        val facingLeft = char.vx < -0.1f
+        val facingLeft = char.facingLeft
         val isAirborne = char.vy < -1.2f || char.vy > 2.0f
 
         val selectedMoveset = com.cfks.goosedroid.model.MovesetMatcher.selectBestMoveset(
@@ -1448,8 +1455,19 @@ fun SpriteCharacterView(char: PhysicsCharacter, modifier: Modifier) {
                 val drawW = frameWidth.coerceAtMost(imageBitmap!!.width - srcX).coerceAtLeast(1)
                 val drawH = frameHeight.coerceAtMost(imageBitmap!!.height - srcY).coerceAtLeast(1)
 
-                val flip = char.vx < 0
-                scale(scaleX = if (flip) -1f else 1f, scaleY = 1f) {
+                var finalFlip = char.facingLeft
+                if (animSequence != null) {
+                    val name = animSequence.name.lowercase()
+                    val hasLeft = name.contains("left") || name.contains("ซ้าย")
+                    val hasRight = name.contains("right") || name.contains("ขวา")
+                    if (hasLeft && !hasRight) {
+                        finalFlip = !char.facingLeft
+                    } else if (hasRight && !hasLeft) {
+                        finalFlip = char.facingLeft
+                    }
+                }
+
+                scale(scaleX = if (finalFlip) -1f else 1f, scaleY = 1f) {
                     drawImage(
                         image = imageBitmap!!,
                         srcOffset = IntOffset(srcX, srcY),
@@ -1462,7 +1480,7 @@ fun SpriteCharacterView(char: PhysicsCharacter, modifier: Modifier) {
         } else {
             // Built-in Minimalist Pixel Mascot (Goose Unit)
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val flip = char.vx < 0
+                val flip = char.facingLeft
                 val frameOffset = if (currentFrameIndex % 2 == 0) 0f else 3f
 
                 scale(scaleX = if (flip) -1f else 1f, scaleY = 1f) {
