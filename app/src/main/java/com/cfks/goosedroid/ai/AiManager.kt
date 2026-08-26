@@ -74,7 +74,7 @@ class AiManager(private val context: Context) {
         """.trimIndent()
 
         val engine = getEngine()
-        val jsonString = engine.generateActionJson(prompt, systemPrompt)
+        val jsonString = engine.generateActionJson(prompt, systemPrompt, conversationId)
         
         // Sanitize string if LLM included markdown blocks
         val cleanedJson = jsonString.replace("```json", "").replace("```", "").trim()

@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import androidx.navigation.navDeepLink
 import com.cfks.goosedroid.ui.screens.ChatHubScreen
 import com.cfks.goosedroid.ui.screens.ChatScreen
 import com.cfks.goosedroid.ui.screens.ConversationsScreen
@@ -169,6 +170,9 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
                     nullable = true
                     defaultValue = null
                 }
+            ),
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "goosedroid://chat/{name}?convId={convId}" }
             )
         ) { backStackEntry ->
             val name = backStackEntry.arguments?.getString("name") ?: "Character"

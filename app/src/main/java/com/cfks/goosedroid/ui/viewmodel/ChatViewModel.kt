@@ -123,7 +123,7 @@ class ChatViewModel(
                     // navigated away while waiting (notification permission is
                     // already granted via the POST_NOTIFICATIONS flow).
                     if (ChatEngine.visibleConversationId.value != convId) {
-                        SystemNotifier.notifyReply(appContext, characterName, result.displayReply)
+                        SystemNotifier.notifyReply(appContext, characterName, result.displayReply, convId)
                     }
                     // Phase 2: compact old turns into a rolling summary when the
                     // conversation grows past the threshold (failures are logged
@@ -140,7 +140,7 @@ class ChatViewModel(
                     )
                 } finally {
                     ChatEngine.setTyping(convId, false)
-                    ChatEngine.setStatus(null)
+                    ChatEngine.setStatus(convId, null)
                 }
             }
         }

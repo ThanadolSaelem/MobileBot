@@ -20,7 +20,7 @@ class CloudAiEngine(private val settings: AiSettings) : AiEngine {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun generateActionJson(prompt: String, systemPrompt: String): String = withContext(Dispatchers.IO) {
+    override suspend fun generateActionJson(prompt: String, systemPrompt: String, conversationId: Long?): String = withContext(Dispatchers.IO) {
         if (settings.cloudApiKey.isBlank()) {
             EngineLogBus.error("CloudEngine", "API KEY MISSING — configure it in settings")
             throw Exception("API Key is missing. Please configure it in settings.")
@@ -51,7 +51,14 @@ class CloudAiEngine(private val settings: AiSettings) : AiEngine {
         }
         val url = "${baseUrl}chat/completions"
         EngineLogBus.info("CloudEngine", "REQUEST → ${settings.cloudModelName} @ ${Request.Builder().url(url).build().url.host}")
-        ChatEngine.setStatus("CONTACTING ${settings.cloudModelName}...")
+        
+        fun updateStatus(text: String?) {
+            conversationId?.let { ChatEngine.setStatus(it, text) }
+            // If conversationId is null (Overlay), we might still want to show it 
+            // in a global status, but the plan focused on per-conversation.
+        }
+
+        updateStatus("CONTACTING ${settings.cloudModelName}...")
 
         val request = Request.Builder()
             .url(url)
@@ -72,7 +79,7 @@ class CloudAiEngine(private val settings: AiSettings) : AiEngine {
                     val message = choices.getJSONObject(0).getJSONObject("message")
                     val content = message.getString("content")
                     EngineLogBus.info("CloudEngine", "RESPONSE OK (${content.length} chars)")
-                    ChatEngine.setStatus(null)
+                    updateStatus(null)
                     return@withContext content
                 } else {
                     EngineLogBus.error("CloudEngine", "No choices found in response")
@@ -82,7 +89,7 @@ class CloudAiEngine(private val settings: AiSettings) : AiEngine {
                 attempt++
                 val delayMs = (1000 * Math.pow(2.0, (attempt - 1).toDouble())).toLong() // 1s, 2s, 4s
                 EngineLogBus.warn("CloudEngine", "Rate limited (429). Retry $attempt/3 in ${delayMs}ms")
-                ChatEngine.setStatus("RETRYING $attempt/3 — RATE LIMITED (${delayMs / 1000}s)")
+                updateStatus("RETRYING $attempt/3 — RATE LIMITED (${delayMs / 1000}s)")
                 delay(delayMs.milliseconds)
                 continue
             } else {

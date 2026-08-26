@@ -25,7 +25,7 @@ object PetBrain {
         CharacterRegistry.addInteractionLog(petName, "USER: $trimmed")
 
         // Live status so the user sees the system is working (not stuck).
-        if (conversationId != null) ChatEngine.setStatus("THINKING...")
+        if (conversationId != null) ChatEngine.setStatus(conversationId, "THINKING...")
         var fallbackReason = "OFFLINE/ERROR"
         
         try {
@@ -77,7 +77,9 @@ object PetBrain {
                 e.message?.contains("timeout", ignoreCase = true) == true -> "TIMEOUT"
                 else -> "OFFLINE/ERROR"
             }
-            ChatEngine.setStatus("OFFLINE — FALLBACK MODE ($fallbackReason)")
+            if (conversationId != null) {
+                ChatEngine.setStatus(conversationId, "OFFLINE — FALLBACK MODE ($fallbackReason)")
+            }
         }
 
         // ตรวจสอบ Moveset พิเศษและ Custom Dialogue ที่ผู้ใช้กำหนดไว้ในตัวละครนี้
@@ -242,7 +244,8 @@ object PetBrain {
 
         // ทำเครื่องหมายว่าเป็นคำตอบจาก fallback พร้อมเหตุผล ให้ user แยกออกจาก
         // คำตอบของ LLM จริงได้ทันที (เช่น FALLBACK // RATE LIMITED · CHAT // RESPONSE)
-        val finalResult = if (fallbackReason != "OFFLINE/ERROR" || ChatEngine.statusText.value?.startsWith("OFFLINE") == true) {
+        val isOffline = conversationId?.let { ChatEngine.statusMap.value[it]?.startsWith("OFFLINE") } == true
+        val finalResult = if (fallbackReason != "OFFLINE/ERROR" || isOffline) {
             result.copy(actionBadge = "FALLBACK // $fallbackReason · ${result.actionBadge}")
         } else {
             result

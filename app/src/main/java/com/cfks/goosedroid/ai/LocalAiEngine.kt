@@ -19,7 +19,7 @@ import java.io.File
  */
 class LocalAiEngine(private val settings: AiSettings) : AiEngine {
 
-    override suspend fun generateActionJson(prompt: String, systemPrompt: String): String {
+    override suspend fun generateActionJson(prompt: String, systemPrompt: String, conversationId: Long?): String {
         if (settings.localModelPath.isBlank()) {
             EngineLogBus.warn("LocalEngine", "NO GGUF MODEL SELECTED — pick one in MODEL_HUB or set path")
             throw Exception("Local model path is not set. Please download a model first.")

@@ -66,14 +66,19 @@ fun ChatScreen(
         )
     }
 
-    // Auto-scroll to bottom when new messages arrive
+    // Auto-scroll to bottom when new messages arrive or typing status changes.
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    LaunchedEffect(messages.size, isTyping) {
+        if (messages.isNotEmpty() || isTyping) {
+            listState.animateScrollToItem(
+                if (isTyping) messages.size else (messages.size - 1).coerceAtLeast(0)
+            )
+        }
     }
 
     // Live engine status (THINKING / RETRYING / OFFLINE — FALLBACK MODE)
-    val engineStatus by ChatEngine.statusText.collectAsState()
+    val statusMap by ChatEngine.statusMap.collectAsState()
+    val engineStatus = activeConversationId?.let { statusMap[it] }
 
     // Tell ChatEngine which conversation is on screen so reply notifications
     // only fire when the user is somewhere else.
@@ -155,6 +160,7 @@ fun ChatScreen(
 
         // 2. Chat Message Stream
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 16.dp, vertical = 12.dp),

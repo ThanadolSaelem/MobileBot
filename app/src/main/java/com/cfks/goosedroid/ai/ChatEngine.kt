@@ -36,12 +36,21 @@ object ChatEngine {
 
     // ── Live engine status (shown in the typing bubble) ────────────────
 
-    private val _statusText = MutableStateFlow<String?>(null)
-    val statusText: StateFlow<String?> = _statusText.asStateFlow()
+    private val _statusMap = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val statusMap: StateFlow<Map<Long, String>> = _statusMap.asStateFlow()
 
     /** e.g. "THINKING...", "RETRYING 1/3 — RATE LIMITED", null = idle. */
+    fun setStatus(conversationId: Long, text: String?) {
+        _statusMap.update { map ->
+            if (text == null) map - conversationId else map + (conversationId to text)
+        }
+    }
+
+    // Deprecated single status for backward compatibility if needed, 
+    // but we'll move everyone to the map.
+    @Deprecated("Use setStatus(conversationId, text)")
     fun setStatus(text: String?) {
-        _statusText.value = text
+        // No-op or log warning if used without ID
     }
 
     // ── Visible-screen tracking (for reply notifications) ───────────────

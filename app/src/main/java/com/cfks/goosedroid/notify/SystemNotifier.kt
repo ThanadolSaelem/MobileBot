@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import com.cfks.goosedroid.MainActivity
 import com.cfks.goosedroid.R
@@ -96,16 +97,26 @@ object SystemNotifier {
      * Fired when the LLM finishes a reply for a conversation that is NOT
      * currently on screen — the user asked to always be informed.
      */
-    fun notifyReply(context: Context, characterName: String, message: String) {
+    fun notifyReply(context: Context, characterName: String, message: String, conversationId: Long) {
+        val uri = Uri.parse("goosedroid://chat/$characterName?convId=$conversationId")
+        val intent = Intent(Intent.ACTION_VIEW, uri, context, MainActivity::class.java)
+        
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            conversationId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification = NotificationCompat.Builder(context, CHANNEL_REPLIES)
             .setSmallIcon(smallIcon(context))
             .setContentTitle("${characterName.uppercase()} REPLIED")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setAutoCancel(true)
-            .setContentIntent(mainIntent(context))
+            .setContentIntent(pendingIntent)
             .build()
-        notifySafe(context, System.currentTimeMillis().toInt(), notification)
+        notifySafe(context, conversationId.toInt(), notification)
     }
 
     private fun mainIntent(context: Context): PendingIntent =
