@@ -1,24 +1,65 @@
 package com.cfks.goosedroid.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-private val DarkColorScheme = darkColorScheme(
+/**
+ * Monochrome Dark scheme — maps the Tdsm gray ramp onto Material roles:
+ *   background=Black | surface=#121212 | elevated=surfaceVariant=#1E1E1E
+ *   accent=primary=White | onAccent=onPrimary=Black
+ */
+private val DarkMonoScheme = darkColorScheme(
     background = TdsmBackground,
-    surface = TdsmSurface,
-    surfaceVariant = TdsmSurfaceElevated,
-    primary = TdsmAccent,
-    secondary = TdsmTextSecondary,
     onBackground = TdsmTextPrimary,
+    surface = TdsmSurface,
     onSurface = TdsmTextPrimary,
-    onPrimary = TdsmBackground,
-    outline = TdsmBorder
+    surfaceVariant = TdsmSurfaceElevated,
+    onSurfaceVariant = TdsmTextSecondary,
+    primary = TdsmAccent,
+    onPrimary = TdsmOnAccent,
+    secondary = TdsmMuted,
+    onSecondary = TdsmBackground,
+    outline = TdsmBorder,
+    outlineVariant = TdsmBorderLight,
+    surfaceContainer = TdsmBadgeBg,
+    surfaceContainerHigh = TdsmSurfaceElevated,
+    surfaceContainerHighest = TdsmSurfaceElevated,
+    inverseSurface = TdsmTextPrimary,
+    inverseOnSurface = TdsmBackground,
+    scrim = TdsmOverlayDim
+)
+
+/**
+ * Monochrome Light scheme — strict inversion of the dark ramp.
+ * No chromatic color is introduced in either mode.
+ */
+private val LightMonoScheme = lightColorScheme(
+    background = TdsmLightBackground,
+    onBackground = TdsmLightTextPrimary,
+    surface = TdsmLightSurface,
+    onSurface = TdsmLightTextPrimary,
+    surfaceVariant = TdsmLightSurfaceElevated,
+    onSurfaceVariant = TdsmLightTextSecondary,
+    primary = TdsmLightAccent,
+    onPrimary = TdsmLightOnAccent,
+    secondary = TdsmLightMuted,
+    onSecondary = TdsmLightBackground,
+    outline = TdsmLightBorder,
+    outlineVariant = TdsmLightBorderLight,
+    surfaceContainer = TdsmLightBadgeBg,
+    surfaceContainerHigh = TdsmLightSurfaceElevated,
+    surfaceContainerHighest = TdsmLightSurfaceElevated,
+    inverseSurface = TdsmLightTextPrimary,
+    inverseOnSurface = TdsmLightBackground,
+    scrim = TdsmOverlayDim
 )
 
 val GooseTypography = Typography(
@@ -47,12 +88,22 @@ val GooseTypography = Typography(
     )
 )
 
+/**
+ * App theme — follows the system dark/light preference by default.
+ * Strictly monochrome in BOTH modes per design mandate:
+ * black, white and grays only — never any chromatic color.
+ *
+ * @param darkTheme override point (e.g. a future in-app setting toggle);
+ * defaults to following the OS setting.
+ */
 @Composable
-fun GooseDesktopTheme(content: @Composable () -> Unit) {
+fun GooseDesktopTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
     MaterialTheme(
-        colorScheme = DarkColorScheme,
+        colorScheme = if (darkTheme) DarkMonoScheme else LightMonoScheme,
         typography = GooseTypography,
         content = content
     )
 }
-

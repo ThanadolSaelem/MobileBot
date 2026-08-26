@@ -87,6 +87,7 @@ fun PlaygroundScreen(
     onNavigateToEditor: (String?) -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToChat: (String) -> Unit,
+    onNavigateToChatHub: () -> Unit = {},
     onLaunchOverlay: (PhysicsCharacter) -> Unit
 ) {
     val context = LocalContext.current
@@ -731,7 +732,8 @@ fun PlaygroundScreen(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter),
+                .align(Alignment.TopCenter)
+                .statusBarsPadding(),
             color = TdsmSurface.copy(alpha = 0.92f),
             border = BorderStroke(1.dp, TdsmBorder)
         ) {
@@ -774,6 +776,18 @@ fun PlaygroundScreen(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    IconButton(
+                        onClick = onNavigateToChatHub,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Forum,
+                            contentDescription = "Chat Hub",
+                            tint = TdsmTextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -917,6 +931,7 @@ fun PlaygroundScreen(
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .navigationBarsPadding()
                 .padding(20.dp),
             shape = RoundedCornerShape(24.dp),
             color = TdsmSurface.copy(alpha = 0.95f),
@@ -1135,6 +1150,26 @@ fun PlaygroundScreen(
                                     )
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Full persistent chat (Phase 1)
+                                    TextButton(
+                                        onClick = {
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            onNavigateToChat(char.spriteSheetData.name)
+                                            chatDialogState = ChatDialogState.IDLE
+                                            activeChatChar = null
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text(
+                                            "CHAT",
+                                            color = TdsmTextPrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     // Edit button in chat head
                                     TextButton(
                                         onClick = {

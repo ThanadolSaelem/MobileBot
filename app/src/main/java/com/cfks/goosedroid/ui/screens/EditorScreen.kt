@@ -1379,6 +1379,7 @@ fun EditorScreen(
                     enabled = isDeployable,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .height(48.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(

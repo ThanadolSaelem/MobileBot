@@ -5,68 +5,95 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import com.cfks.goosedroid.brain.PetBrain
-import com.cfks.goosedroid.ui.theme.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cfks.goosedroid.ai.ChatEngine
+import com.cfks.goosedroid.ui.viewmodel.ChatViewModel
 
 data class ChatMessage(
     val sender: String,
     val text: String,
     val isMe: Boolean,
     val actionBadge: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
 )
 
 @Composable
 fun ChatScreen(
     characterName: String,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onOpenConversations: () -> Unit = {},
+    conversationId: Long? = null
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val viewModel: ChatViewModel = viewModel(
+        key = "chat_$characterName#${conversationId ?: 0}",
+        factory = ChatViewModel.factory(context, characterName, conversationId)
+    )
+    val persistedMessages by viewModel.messages.collectAsState()
+    val activeConversationId by viewModel.activeConversationId.collectAsState()
+    val typingConversationIds by ChatEngine.typingConversationIds.collectAsState()
+    // Typing state lives in the app-scoped ChatEngine, so a recreated screen
+    // still shows the indicator while an in-flight request continues.
+    val isTyping = activeConversationId != null &&
+        typingConversationIds.contains(activeConversationId)
     var inputText by remember { mutableStateOf("") }
-    var isTyping by remember { mutableStateOf(false) }
 
-    var messages by remember {
-        mutableStateOf(
-            listOf(
-                ChatMessage(
-                    sender = characterName,
-                    text = "สวัสดีครับผู้บัญชาการ $characterName ออนไลน์และพร้อมรับคำสั่งภาษาไทยแล้วครับ",
-                    isMe = false,
-                    actionBadge = "SYSTEM // READY"
-                )
-            )
+    val messages = persistedMessages.map {
+        ChatMessage(
+            sender = it.sender,
+            text = it.text,
+            isMe = it.isFromUser,
+            actionBadge = it.actionBadge,
+            timestamp = it.timestamp
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(TdsmBackground)
-    ) {
+    // Auto-scroll to bottom when new messages arrive
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    }
+
+    // Live engine status (THINKING / RETRYING / OFFLINE — FALLBACK MODE)
+    val engineStatus by ChatEngine.statusText.collectAsState()
+
+    // Tell ChatEngine which conversation is on screen so reply notifications
+    // only fire when the user is somewhere else.
+    DisposableEffect(activeConversationId) {
+        ChatEngine.setVisibleConversation(activeConversationId)
+        onDispose { ChatEngine.setVisibleConversation(null) }
+    }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
         // 1. Top App Bar
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = TdsmSurface,
-            border = BorderStroke(1.dp, TdsmBorder)
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding(),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
             Row(
                 modifier = Modifier
@@ -79,9 +106,9 @@ fun ChatScreen(
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = TdsmTextPrimary
+                        tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
@@ -89,17 +116,40 @@ fun ChatScreen(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(TdsmTextPrimary)
+                        .background(MaterialTheme.colorScheme.primary)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     "COMM LINK // ${characterName.uppercase()}",
-                    color = TdsmTextPrimary,
+                    color = MaterialTheme.colorScheme.onBackground,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.weight(1f)
                 )
+                IconButton(
+                    onClick = onOpenConversations,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Forum,
+                        contentDescription = "Conversations",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { viewModel.startNewChat() },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "New Chat",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
@@ -116,8 +166,8 @@ fun ChatScreen(
                     horizontalArrangement = if (msg.isMe) Arrangement.End else Arrangement.Start
                 ) {
                     Surface(
-                        color = if (msg.isMe) Color(0xFFFFFFFF) else TdsmSurfaceElevated,
-                        border = BorderStroke(1.dp, if (msg.isMe) Color(0xFFFFFFFF) else TdsmBorder),
+                        color = if (msg.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, if (msg.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
                         shape = if (msg.isMe) {
                             RoundedCornerShape(topStart = 12.dp, topEnd = 2.dp, bottomEnd = 12.dp, bottomStart = 12.dp)
                         } else {
@@ -135,20 +185,20 @@ fun ChatScreen(
                                 ) {
                                     Text(
                                         msg.sender.uppercase(),
-                                        color = TdsmTextSecondary,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold
                                     )
                                     if (msg.actionBadge != null) {
                                         Surface(
-                                            color = Color(0xFF262626),
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
                                             shape = RoundedCornerShape(4.dp),
-                                            border = BorderStroke(1.dp, TdsmBorderLight)
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                                         ) {
                                             Text(
                                                 msg.actionBadge,
-                                                color = TdsmTextPrimary,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 fontSize = 8.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
@@ -160,7 +210,7 @@ fun ChatScreen(
                             }
                             Text(
                                 msg.text,
-                                color = if (msg.isMe) Color.Black else TdsmTextPrimary,
+                                color = if (msg.isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                                 fontSize = 12.sp
                             )
                         }
@@ -172,17 +222,27 @@ fun ChatScreen(
                 item {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
                         Surface(
-                            color = TdsmSurfaceElevated,
-                            border = BorderStroke(1.dp, TdsmBorder),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(
-                                "...",
-                                color = TdsmTextSecondary,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                Text(
+                                    "...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                // Live status: THINKING / RETRYING 1/3 — RATE LIMITED / OFFLINE
+                                engineStatus?.let { status ->
+                                    Text(
+                                        status,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -191,9 +251,11 @@ fun ChatScreen(
 
         // 3. Input Bar
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = TdsmSurface,
-            border = BorderStroke(1.dp, TdsmBorder)
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
             Row(
                 modifier = Modifier
@@ -205,17 +267,17 @@ fun ChatScreen(
                     value = inputText,
                     onValueChange = { inputText = it },
                     placeholder = {
-                        Text("Transmitting command / message...", color = TdsmMuted, fontSize = 12.sp)
+                        Text("Transmitting command / message...", color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
                     },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TdsmTextPrimary,
-                        unfocusedTextColor = TdsmTextPrimary,
-                        focusedBorderColor = TdsmTextPrimary,
-                        unfocusedBorderColor = TdsmBorder,
-                        focusedContainerColor = TdsmSurfaceElevated,
-                        unfocusedContainerColor = TdsmSurfaceElevated
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -225,33 +287,19 @@ fun ChatScreen(
                 IconButton(
                     onClick = {
                         if (inputText.isNotBlank()) {
-                            val userMsg = inputText.trim()
-                            messages = messages + ChatMessage(sender = "Commander", text = userMsg, isMe = true)
+                            viewModel.send(inputText)
                             inputText = ""
-                            isTyping = true
-
-                            scope.launch {
-                                delay(350)
-                                val result = PetBrain.processCommand(context, userMsg, characterName)
-                                isTyping = false
-                                messages = messages + ChatMessage(
-                                    sender = characterName,
-                                    text = result.displayReply,
-                                    actionBadge = result.actionBadge,
-                                    isMe = false
-                                )
-                            }
                         }
                     },
                     modifier = Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(TdsmTextPrimary)
+                        .background(MaterialTheme.colorScheme.primary)
                 ) {
                     Icon(
-                        Icons.Default.Send,
+                        Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = Color.Black,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                 }

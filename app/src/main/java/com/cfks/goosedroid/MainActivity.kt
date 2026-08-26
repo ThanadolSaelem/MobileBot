@@ -6,25 +6,34 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.padding
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import com.cfks.goosedroid.ui.screens.ChatHubScreen
 import com.cfks.goosedroid.ui.screens.ChatScreen
+import com.cfks.goosedroid.ui.screens.ConversationsScreen
 import com.cfks.goosedroid.ui.screens.EditorScreen
 import com.cfks.goosedroid.ui.screens.PlaygroundScreen
 import com.cfks.goosedroid.ui.screens.AiSettingsScreen
 import com.cfks.goosedroid.ui.screens.ModelHubScreen
 import com.cfks.goosedroid.ui.theme.GooseDesktopTheme
+import com.cfks.goosedroid.ui.alert.AppAlertHost
+import com.cfks.goosedroid.notify.SystemNotifier
 import com.cfks.goosedroid.ui.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
@@ -32,6 +41,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        SystemNotifier.ensureChannels(this)
         checkPermissions()
         handleIntent(intent)
         setContent {
@@ -40,7 +51,14 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavigation(mainViewModel, this)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AppNavigation(mainViewModel, this@MainActivity)
+                        AppAlertHost(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(horizontal = 16.dp, vertical = 48.dp)
+                        )
+                    }
                 }
             }
         }
@@ -84,6 +102,7 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
             PlaygroundScreen(
                 viewModel = viewModel,
                 onNavigateToSettings = { navController.navigate("settings") },
+                onNavigateToChatHub = { navController.navigate("chat_hub") },
                 onNavigateToEditor = { charId -> 
                     if (charId != null) {
                         navController.navigate("editor?id=$charId")
@@ -142,11 +161,41 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
         composable("model_hub") {
             ModelHubScreen(navController = navController)
         }
-        composable("chat/{name}") { backStackEntry ->
+        composable(
+            "chat/{name}?convId={convId}",
+            arguments = listOf(
+                navArgument("convId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStackEntry ->
             val name = backStackEntry.arguments?.getString("name") ?: "Character"
+            val convId = backStackEntry.arguments?.getString("convId")?.toLongOrNull()
             ChatScreen(
                 characterName = name,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onOpenConversations = { navController.navigate("chats/$name") },
+                conversationId = convId
+            )
+        }
+
+        composable("chats/{name}") { backStackEntry ->
+            val name = backStackEntry.arguments?.getString("name") ?: "Character"
+            ConversationsScreen(
+                characterName = name,
+                onNavigateBack = { navController.popBackStack() },
+                onOpenConversation = { id ->
+                    navController.navigate("chat/$name?convId=$id")
+                }
+            )
+        }
+
+        composable("chat_hub") {
+            ChatHubScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onOpenChat = { name -> navController.navigate("chat/$name") }
             )
         }
     }

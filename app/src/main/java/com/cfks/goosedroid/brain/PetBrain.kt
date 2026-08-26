@@ -2,6 +2,8 @@ package com.cfks.goosedroid.brain
 
 import android.content.Context
 import com.cfks.goosedroid.ai.AiManager
+import com.cfks.goosedroid.ai.ChatEngine
+import com.cfks.goosedroid.ai.EngineLogBus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -10,19 +12,28 @@ import kotlinx.coroutines.withContext
  * รองรับการแยก Context และความจำเฉพาะของตัวละครแต่ละตัวตามชื่อเฉพาะ
  */
 object PetBrain {
-    suspend fun processCommand(context: Context, userText: String, petName: String = "Unit"): LlmActionResult = withContext(Dispatchers.Default) {
+    suspend fun processCommand(
+        context: Context,
+        userText: String,
+        petName: String = "Unit",
+        conversationId: Long? = null
+    ): LlmActionResult = withContext(Dispatchers.Default) {
         val trimmed = userText.trim()
         val lower = trimmed.lowercase()
 
         // บันทึก Log การสั่งการลงใน Context เฉพาะตัวของตัวละครนี้
         CharacterRegistry.addInteractionLog(petName, "USER: $trimmed")
+
+        // Live status so the user sees the system is working (not stuck).
+        if (conversationId != null) ChatEngine.setStatus("THINKING...")
+        var fallbackReason = "OFFLINE/ERROR"
         
         try {
             val aiManager = AiManager(context)
             val unitInfo = CharacterRegistry.getUnitInfo(petName)
             val data = unitInfo?.id?.let { CharacterRegistry.getCharacterData(it) }
             val persona = data?.persona ?: ""
-            val directive = aiManager.getNextAction(trimmed, persona, petName)
+            val directive = aiManager.getNextAction(trimmed, persona, petName, conversationId)
             
             var finalSpeech = directive.speech ?: "..."
             
@@ -30,6 +41,7 @@ object PetBrain {
             directive.toolCall?.let { toolCall ->
                 val toolResult = aiManager.toolRegistry.executeTool(context, toolCall.name, toolCall.args)
                 android.util.Log.d("PetBrain", "Tool Result: $toolResult")
+                EngineLogBus.info("PetBrain", "TOOL ${toolCall.name}: ${toolResult.take(140)}")
                 CharacterRegistry.addInteractionLog(petName, "TOOL RESULT (${toolCall.name}): $toolResult")
                 
                 if (toolResult.startsWith("Server started.")) {
@@ -58,6 +70,14 @@ object PetBrain {
         } catch (e: Exception) {
             e.printStackTrace()
             android.util.Log.e("PetBrain", "AI Call Failed, falling back to local mocks", e)
+            EngineLogBus.error("PetBrain", "AI CALL FAILED → local fallback: ${e.message?.take(140)}")
+            fallbackReason = when {
+                e.message?.contains("429") == true -> "RATE LIMITED"
+                e.message?.contains("rate-limited", ignoreCase = true) == true -> "RATE LIMITED"
+                e.message?.contains("timeout", ignoreCase = true) == true -> "TIMEOUT"
+                else -> "OFFLINE/ERROR"
+            }
+            ChatEngine.setStatus("OFFLINE — FALLBACK MODE ($fallbackReason)")
         }
 
         // ตรวจสอบ Moveset พิเศษและ Custom Dialogue ที่ผู้ใช้กำหนดไว้ในตัวละครนี้
@@ -220,9 +240,17 @@ object PetBrain {
             }
         }
 
+        // ทำเครื่องหมายว่าเป็นคำตอบจาก fallback พร้อมเหตุผล ให้ user แยกออกจาก
+        // คำตอบของ LLM จริงได้ทันที (เช่น FALLBACK // RATE LIMITED · CHAT // RESPONSE)
+        val finalResult = if (fallbackReason != "OFFLINE/ERROR" || ChatEngine.statusText.value?.startsWith("OFFLINE") == true) {
+            result.copy(actionBadge = "FALLBACK // $fallbackReason · ${result.actionBadge}")
+        } else {
+            result
+        }
+
         // บันทึก Response ลงใน Context
-        CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${result.displayReply}")
-        result
+        CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${finalResult.displayReply}")
+        finalResult
     }
 }
 

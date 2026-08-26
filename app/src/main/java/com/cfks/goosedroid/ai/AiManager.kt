@@ -2,6 +2,8 @@ package com.cfks.goosedroid.ai
 
 import android.content.Context
 import com.cfks.goosedroid.OverlayLlmDirective
+import com.cfks.goosedroid.brain.MemoryManager
+import com.cfks.goosedroid.data.ChatRepository
 import com.cfks.goosedroid.plugins.ToolRegistry
 import kotlinx.serialization.json.Json
 
@@ -24,14 +26,27 @@ class AiManager(private val context: Context) {
         }
     }
 
-    suspend fun getNextAction(prompt: String, characterPersona: String = "", characterName: String = "Unit"): OverlayLlmDirective {
+    suspend fun getNextAction(
+        prompt: String,
+        characterPersona: String = "",
+        characterName: String = "Unit",
+        conversationId: Long? = null,
+    ): OverlayLlmDirective {
+        val settings = repository.getSettings()
+        EngineLogBus.debug("AiManager", "MODE=${settings.mode} UNIT=$characterName")
         val baseRole = if (characterPersona.isNotBlank()) {
             "You are $characterName. $characterPersona"
         } else {
             "You are $characterName, an autonomous desktop unit operating on the user's screen."
         }
         
-        val recentHistory = com.cfks.goosedroid.brain.CharacterRegistry.getInteractionContext(characterName)
+        val recentHistory = if (conversationId != null) {
+            // Phase 2: Room-backed memory (summaries + sliding window)
+            MemoryManager.buildContext(ChatRepository(context), conversationId).promptBlock
+        } else {
+            // Overlay/inline paths without a conversation still get in-RAM context
+            com.cfks.goosedroid.brain.CharacterRegistry.getInteractionContext(characterName)
+        }
 
         val toolPrompt = toolRegistry.getPromptDescription()
 
@@ -64,7 +79,12 @@ class AiManager(private val context: Context) {
         // Sanitize string if LLM included markdown blocks
         val cleanedJson = jsonString.replace("```json", "").replace("```", "").trim()
         
-        val llmResponse = jsonParser.decodeFromString<LlmResponse>(cleanedJson)
+        val llmResponse = try {
+            jsonParser.decodeFromString<LlmResponse>(cleanedJson)
+        } catch (e: Exception) {
+            EngineLogBus.error("AiManager", "JSON PARSE FAILED: ${e.message?.take(160) ?: "unknown"}")
+            throw e
+        }
         
         return OverlayLlmDirective(
             action = llmResponse.action,
@@ -77,5 +97,26 @@ class AiManager(private val context: Context) {
             speech = llmResponse.speech,
             toolCall = llmResponse.tool_call
         )
+    }
+
+    /**
+     * Phase 2: freeform completion used by the memory compactor.
+     * Returns the raw model output (no JSON parsing), or null on failure.
+     */
+    suspend fun summarizeTranscript(transcript: String, characterName: String): String? {
+        return try {
+            val system = """
+                You are the long-term memory compactor for an AI desktop pet named $characterName.
+                Condense the conversation transcript into a compact factual summary written in Thai.
+                Keep: user preferences, personal facts, commitments, and unresolved topics.
+                Be brief (max ~120 words). Output ONLY the summary text — no markdown, no JSON.
+            """.trimIndent()
+            val out = getEngine().generateActionJson(transcript, system)
+            EngineLogBus.debug("AiManager", "SUMMARY GENERATED (${out.length} chars)")
+            out.replace("```json", "").replace("```", "").trim().ifBlank { null }
+        } catch (e: Exception) {
+            EngineLogBus.warn("AiManager", "SUMMARIZE FAILED: ${e.message?.take(120)}")
+            null
+        }
     }
 }

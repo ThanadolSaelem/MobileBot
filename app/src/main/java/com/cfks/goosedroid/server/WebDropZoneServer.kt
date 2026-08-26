@@ -1,7 +1,6 @@
 package com.cfks.goosedroid.server
 
 import android.content.Context
-import android.net.wifi.WifiManager
 import android.util.Log
 import io.ktor.http.*
 import io.ktor.http.content.*
@@ -13,6 +12,8 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.*
 import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.util.UUID
 
 object WebDropZoneServer {
@@ -23,16 +24,29 @@ object WebDropZoneServer {
     // Callback when a file is received
     var onFileReceived: ((File) -> Unit)? = null
     
-    private fun getLocalIpAddress(context: Context): String {
-        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val ipAddress = wifiManager.connectionInfo.ipAddress
-        return String.format(
-            "%d.%d.%d.%d",
-            ipAddress and 0xff,
-            ipAddress shr 8 and 0xff,
-            ipAddress shr 16 and 0xff,
-            ipAddress shr 24 and 0xff
-        )
+    /**
+     * Enumerates network interfaces directly — no WifiManager permission
+     * needed (the old connectionInfo call threw SecurityException without
+     * ACCESS_WIFI_STATE, which broke the web_drop_zone tool).
+     */
+    private fun getLocalIpAddress(@Suppress("UNUSED_PARAMETER") context: Context): String {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val ni = interfaces.nextElement()
+                val addresses = ni.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        return addr.hostAddress ?: continue
+                    }
+                }
+            }
+            "0.0.0.0"
+        } catch (e: Exception) {
+            Log.e("WebDropZone", "IP lookup failed: ${e.message}")
+            "0.0.0.0"
+        }
     }
 
     fun startServer(context: Context): String {
