@@ -69,12 +69,14 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Security for API Keys
     implementation(libs.androidx.security.crypto.ktx)
 
     // Networking
     implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
 
     // Serialization
     implementation(libs.kotlinx.serialization.json)

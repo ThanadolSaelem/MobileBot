@@ -5,6 +5,14 @@ import com.cfks.goosedroid.OverlayLlmDirective
 import com.cfks.goosedroid.brain.MemoryManager
 import com.cfks.goosedroid.data.ChatRepository
 import com.cfks.goosedroid.plugins.ToolRegistry
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.scan
 import kotlinx.serialization.json.Json
 
 class AiManager(private val context: Context) {
@@ -18,8 +26,16 @@ class AiManager(private val context: Context) {
         isLenient = true
     }
 
-    private fun getEngine(): AiEngine {
+    private fun getEngine(secondary: Boolean = false): AiEngine {
         val settings = repository.getSettings()
+        if (secondary && settings.fallbackEnabled && settings.secondaryApiKey.isNotBlank()) {
+            val secondarySettings = settings.copy(
+                cloudApiKey = settings.secondaryApiKey,
+                cloudBaseUrl = settings.secondaryBaseUrl,
+                cloudModelName = settings.secondaryModelName
+            )
+            return CloudAiEngine(secondarySettings)
+        }
         return when (settings.mode) {
             AiMode.CLOUD_API -> CloudAiEngine(settings)
             AiMode.LOCAL_LLAMA -> LocalAiEngine(settings)
@@ -74,7 +90,14 @@ class AiManager(private val context: Context) {
         """.trimIndent()
 
         val engine = getEngine()
-        val jsonString = engine.generateActionJson(prompt, systemPrompt, conversationId)
+        val jsonString = try {
+            engine.generateActionJson(prompt, systemPrompt, conversationId)
+        } catch (e: Exception) {
+            if (repository.getSettings().fallbackEnabled) {
+                EngineLogBus.warn("AiManager", "PRIMARY FAILED -> FALLBACK: ${e.message}")
+                getEngine(true).generateActionJson(prompt, systemPrompt, conversationId)
+            } else throw e
+        }
         
         // Sanitize string if LLM included markdown blocks
         val cleanedJson = jsonString.replace("```json", "").replace("```", "").trim()
@@ -97,6 +120,105 @@ class AiManager(private val context: Context) {
             speech = llmResponse.speech,
             toolCall = llmResponse.tool_call
         )
+    }
+
+    suspend fun getNextActionStream(
+        prompt: String,
+        characterPersona: String = "",
+        characterName: String = "Unit",
+        conversationId: Long? = null,
+    ): Flow<OverlayLlmDirective> {
+        val settings = repository.getSettings()
+        val baseRole = if (characterPersona.isNotBlank()) {
+            "You are $characterName. $characterPersona"
+        } else {
+            "You are $characterName, an autonomous desktop unit operating on the user's screen."
+        }
+        
+        val recentHistory = if (conversationId != null) {
+            MemoryManager.buildContext(ChatRepository(context), conversationId).promptBlock
+        } else {
+            com.cfks.goosedroid.brain.CharacterRegistry.getInteractionContext(characterName)
+        }
+
+        val toolPrompt = toolRegistry.getPromptDescription()
+
+        val systemPrompt = """
+            $baseRole
+            
+            RECENT CONVERSATION HISTORY (Use this context for multi-turn replies):
+            $recentHistory
+
+            $toolPrompt
+
+            Respond to the user's command by deciding your action and speech.
+            Always reply in the following JSON format ONLY:
+            {
+                "thought": "Your internal reasoning or diagnostic",
+                "speech": "What you output to the user (matching your persona/role)",
+                "action": "One of: IDLE, WALK, RUN, JUMP",
+                "moveset_name": "Optional exact animation name if needed",
+                "direction_x": Float,
+                "direction_y": Float,
+                "duration_frames": Integer,
+                "tool_call": { "name": "tool_name", "args": { "param": "value" } }
+            }
+            Do not output any markdown formatting, only pure JSON.
+        """.trimIndent()
+
+        val engine = getEngine()
+        var receivedAnyData = false
+        
+        return engine.generateActionStream(prompt, systemPrompt, conversationId)
+            .onEach { receivedAnyData = true }
+            .catch { e ->
+                if (!receivedAnyData) {
+                    EngineLogBus.warn("AiManager", "STREAM FAILED: ${e.message} — TRYING NON-STREAM FALLBACK")
+                    try {
+                        val fullResponse = engine.generateActionJson(prompt, systemPrompt, conversationId)
+                        emit(fullResponse)
+                    } catch (jsonErr: Exception) {
+                        if (repository.getSettings().fallbackEnabled) {
+                            EngineLogBus.warn("AiManager", "FALLBACK FAILED -> SECONDARY ENGINE")
+                            emitAll(getEngine(true).generateActionStream(prompt, systemPrompt, conversationId))
+                        } else throw jsonErr
+                    }
+                } else {
+                    EngineLogBus.error("AiManager", "STREAM INTERRUPTED: ${e.message}")
+                    throw e
+                }
+            }
+            .scan("") { accumulated, delta -> accumulated + delta }
+            .map { fullString ->
+                val partialSpeech = PartialJsonParser.extractSpeech(fullString)
+                
+                // Try to parse full JSON if it seems complete
+                if (fullString.trim().endsWith("}")) {
+                    try {
+                        val cleaned = fullString.replace("```json", "").replace("```", "").trim()
+                        val res = jsonParser.decodeFromString<LlmResponse>(cleaned)
+                        return@map OverlayLlmDirective(
+                            action = res.action,
+                            movesetName = res.moveset_name,
+                            vx = res.direction_x,
+                            vy = res.direction_y,
+                            durationFrames = res.duration_frames,
+                            targetDx = res.direction_x * res.duration_frames,
+                            targetDy = res.direction_y * res.duration_frames,
+                            speech = res.speech,
+                            toolCall = res.tool_call
+                        )
+                    } catch (e: Exception) {
+                        // Not fully valid yet or failed parse
+                    }
+                }
+                
+                // Emitting partial directive with current speech
+                OverlayLlmDirective(
+                    action = "IDLE", // Default until full JSON parsed
+                    speech = partialSpeech
+                )
+            }
     }
 
     /**

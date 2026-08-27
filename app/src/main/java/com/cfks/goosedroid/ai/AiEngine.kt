@@ -8,4 +8,9 @@ interface AiEngine {
      * Returns a JSON string representing the LlmResponse.
      */
     suspend fun generateActionJson(prompt: String, systemPrompt: String, conversationId: Long? = null): String
+
+    /**
+     * Phase 3: SSE Streaming. Emits incremental chunks of the response.
+     */
+    fun generateActionStream(prompt: String, systemPrompt: String, conversationId: Long? = null): Flow<String>
 }

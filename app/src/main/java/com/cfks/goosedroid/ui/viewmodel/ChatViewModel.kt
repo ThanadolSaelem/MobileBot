@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -110,24 +111,34 @@ class ChatViewModel(
 
             ChatEngine.scope.launch {
                 ChatEngine.setTyping(convId, true)
+                var assistantMsgId: Long? = null
                 try {
-                    val result = PetBrain.processCommand(appContext, trimmed, characterName, convId)
-                    repo.addMessage(
-                        convId,
-                        characterName,
-                        result.displayReply,
-                        result.actionBadge,
-                        false
-                    )
-                    // Always inform the user when a reply lands — even if they
-                    // navigated away while waiting (notification permission is
-                    // already granted via the POST_NOTIFICATIONS flow).
+                    PetBrain.processCommandStream(appContext, trimmed, characterName, convId)
+                        .collect { result ->
+                            if (assistantMsgId == null) {
+                                assistantMsgId = repo.addMessage(
+                                    convId,
+                                    characterName,
+                                    result.displayReply,
+                                    result.actionBadge,
+                                    false
+                                )
+                            } else {
+                                repo.updateMessage(
+                                    assistantMsgId,
+                                    result.displayReply,
+                                    result.actionBadge
+                                )
+                            }
+                        }
+                    
+                    // Final steps after stream ends
+                    val latestMsg = assistantMsgId?.let { repo.getAllMessages(convId).find { m -> m.id == it } }
+                    val finalReply = latestMsg?.text ?: ""
+                    
                     if (ChatEngine.visibleConversationId.value != convId) {
-                        SystemNotifier.notifyReply(appContext, characterName, result.displayReply, convId)
+                        SystemNotifier.notifyReply(appContext, characterName, finalReply, convId)
                     }
-                    // Phase 2: compact old turns into a rolling summary when the
-                    // conversation grows past the threshold (failures are logged
-                    // and retried on the next turn).
                     MemoryManager.summarizeIfNeeded(appContext, repo, characterName, convId)
                 } catch (e: Exception) {
                     EngineLogBus.error("ChatViewModel", "SEND FAILED: ${e.message?.take(140)}")

@@ -62,8 +62,14 @@ interface ChatMessageDao {
     @Query("SELECT COUNT(*) FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun countByConversation(conversationId: Long): Int
 
+    @Query("SELECT * FROM chat_messages WHERE id = :id")
+    suspend fun getById(id: Long): ChatMessageEntity?
+
     @Insert
     suspend fun insert(message: ChatMessageEntity): Long
+
+    @Update
+    suspend fun update(message: ChatMessageEntity)
 
     @Insert
     suspend fun insertAll(messages: List<ChatMessageEntity>)

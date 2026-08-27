@@ -71,6 +71,11 @@ class ChatRepository(context: Context) {
         return id
     }
 
+    suspend fun updateMessage(id: Long, text: String, actionBadge: String? = null) {
+        val msg = messageDao.getById(id) ?: return
+        messageDao.update(msg.copy(text = text, actionBadge = actionBadge ?: msg.actionBadge))
+    }
+
     suspend fun messageCount(conversationId: Long): Int =
         messageDao.countByConversation(conversationId)
 

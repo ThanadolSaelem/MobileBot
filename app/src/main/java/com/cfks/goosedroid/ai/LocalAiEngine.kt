@@ -1,6 +1,8 @@
 package com.cfks.goosedroid.ai
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import java.io.File
 
 /**
@@ -45,5 +47,16 @@ class LocalAiEngine(private val settings: AiSettings) : AiEngine {
                 "duration_frames": 120
             }
         """.trimIndent()
+    }
+
+    override fun generateActionStream(prompt: String, systemPrompt: String, conversationId: Long?): Flow<String> = flow {
+        // Simulated streaming for stub
+        
+        // Emit chunks of the speech specifically for testing the partial parser
+        emit("""{"thought": "Thinking..." """)
+        delay(500)
+        emit(""", "speech": "I am a local AI """)
+        delay(500)
+        emit("""streaming my response!", "action": "IDLE"}""")
     }
 }

@@ -104,6 +104,7 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
                 viewModel = viewModel,
                 onNavigateToSettings = { navController.navigate("settings") },
                 onNavigateToChatHub = { navController.navigate("chat_hub") },
+                onNavigateToModelHub = { navController.navigate("model_hub") },
                 onNavigateToEditor = { charId -> 
                     if (charId != null) {
                         navController.navigate("editor?id=$charId")

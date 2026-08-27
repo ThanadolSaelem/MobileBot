@@ -88,6 +88,7 @@ fun PlaygroundScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToChat: (String) -> Unit,
     onNavigateToChatHub: () -> Unit = {},
+    onNavigateToModelHub: () -> Unit = {},
     onLaunchOverlay: (PhysicsCharacter) -> Unit
 ) {
     val context = LocalContext.current
@@ -150,6 +151,9 @@ fun PlaygroundScreen(
     var assistantBubbleText by remember { mutableStateOf<String?>(null) }
     var userBubbleText by remember { mutableStateOf<String?>(null) }
     var isAssistantTyping by remember { mutableStateOf(false) }
+
+    // Bottom dock state
+    var isMenuExpanded by remember { mutableStateOf(false) }
 
     // Register active units with CharacterRegistry for LLM context & actions
     LaunchedEffect(physicsCharacters) {
@@ -740,52 +744,69 @@ fun PlaygroundScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Left: Project Identity
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
+                            .size(6.dp)
                             .clip(CircleShape)
                             .background(TdsmTextPrimary)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "PROJECT: GOOSE DROID",
+                        "GOOSE DROID",
                         color = TdsmTextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.sp
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1
                     )
                 }
 
+                // Right: Active Units & Quick Access Hubs
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "ACTIVE UNITS: ",
+                        "UNITS: ",
                         color = TdsmTextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
                         "${physicsCharacters.size}",
                         color = TdsmTextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = onNavigateToModelHub,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = "Model Hub",
+                            tint = TdsmTextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                     IconButton(
                         onClick = onNavigateToChatHub,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             Icons.Default.Forum,
                             contentDescription = "Chat Hub",
                             tint = TdsmTextPrimary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -927,7 +948,7 @@ fun PlaygroundScreen(
             }
         }
 
-        // 8. Bottom Dock Buttons
+        // 8. Bottom Dock Buttons (Collapsible Menu)
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -942,44 +963,80 @@ fun PlaygroundScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Wallpaper Dialog Button
+                // Menu Toggle Button
                 IconButton(
-                    onClick = { showWallpaperDialog = true },
+                    onClick = { isMenuExpanded = !isMenuExpanded },
                     modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
-                        Icons.Default.Wallpaper,
-                        contentDescription = "Manage Wallpaper",
-                        tint = TdsmTextPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // AI Settings Button
-                IconButton(
-                    onClick = { onNavigateToSettings() },
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        Icons.Default.SmartToy,
-                        contentDescription = "AI Settings",
+                        if (isMenuExpanded) Icons.Default.Close else Icons.Default.Apps,
+                        contentDescription = "Menu",
                         tint = TdsmTextPrimary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(8.dp))
 
-                // Studio Editor Button
-                IconButton(
-                    onClick = { onNavigateToEditor(null) },
-                    modifier = Modifier.size(44.dp)
+                AnimatedVisibility(
+                    visible = isMenuExpanded,
+                    enter = expandHorizontally() + fadeIn(),
+                    exit = shrinkHorizontally() + fadeOut()
                 ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = "Studio Editor",
-                        tint = TdsmTextPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Wallpaper Dialog Button
+                        IconButton(
+                            onClick = { showWallpaperDialog = true },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Wallpaper,
+                                contentDescription = "Manage Wallpaper",
+                                tint = TdsmTextPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // AI Settings Button
+                        IconButton(
+                            onClick = { onNavigateToSettings() },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.SmartToy,
+                                contentDescription = "AI Settings",
+                                tint = TdsmTextPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        // Model Hub Button
+                        IconButton(
+                            onClick = { onNavigateToModelHub() },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Download,
+                                contentDescription = "Model Hub",
+                                tint = TdsmTextPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        // Studio Editor Button (Add)
+                        IconButton(
+                            onClick = { onNavigateToEditor(null) },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Studio Editor",
+                                tint = TdsmTextPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -66,9 +66,11 @@ fun ChatScreen(
         )
     }
 
-    // Auto-scroll to bottom when new messages arrive or typing status changes.
+    // Auto-scroll to bottom when messages arrive, typing status changes, 
+    // OR the content of the last message grows (streaming).
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size, isTyping) {
+    val lastMessageText = messages.lastOrNull()?.text ?: ""
+    LaunchedEffect(messages.size, isTyping, lastMessageText) {
         if (messages.isNotEmpty() || isTyping) {
             listState.animateScrollToItem(
                 if (isTyping) messages.size else (messages.size - 1).coerceAtLeast(0)

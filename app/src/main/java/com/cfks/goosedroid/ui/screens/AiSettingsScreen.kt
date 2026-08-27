@@ -2,6 +2,7 @@ package com.cfks.goosedroid.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -23,10 +24,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import java.util.Locale
 import com.cfks.goosedroid.ai.AiMode
 import com.cfks.goosedroid.ai.AiSettings
 import com.cfks.goosedroid.ai.AiSettingsRepository
+import com.cfks.goosedroid.ai.AiProvider
+import com.cfks.goosedroid.ai.ProviderRegistry
 import com.cfks.goosedroid.ai.ConnectionTester
 import com.cfks.goosedroid.ai.EngineLogLevel
 import com.cfks.goosedroid.ai.EngineLogBus
@@ -129,6 +134,10 @@ fun AiSettingsScreen(navController: NavController) {
                 LocalSettingsPanel(settings, navController) { updated -> settings = updated }
             }
             
+            ParametersPanel(settings) { updated -> settings = updated }
+            
+            EngineLogConsole()
+            
             Spacer(modifier = Modifier.height(16.dp))
             
             Text(
@@ -207,6 +216,38 @@ fun CloudSettingsPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("// PROVIDER PRESETS", fontFamily = FontFamily.Monospace, color = TeslaLightGrey, fontSize = 10.sp)
+        
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ProviderRegistry.providers.forEach { provider ->
+                FilterChip(
+                    selected = settings.cloudBaseUrl == provider.baseUrl,
+                    onClick = {
+                        onUpdate(settings.copy(
+                            cloudBaseUrl = provider.baseUrl,
+                            cloudModelName = provider.defaultModel
+                        ))
+                    },
+                    label = { Text(provider.name, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = TeslaDarkGrey,
+                        labelColor = TeslaLightGrey,
+                        selectedContainerColor = TeslaWhite,
+                        selectedLabelColor = TeslaBlack
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = TeslaGrey,
+                        selectedBorderColor = TeslaWhite,
+                        enabled = true,
+                        selected = settings.cloudBaseUrl == provider.baseUrl
+                    )
+                )
+            }
+        }
+
         OutlinedTextField(
             value = settings.cloudBaseUrl,
             onValueChange = { onUpdate(settings.copy(cloudBaseUrl = it)) },
@@ -231,8 +272,6 @@ fun CloudSettingsPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             colors = textFieldColors,
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
-            // Masked like a password — never render the secret in plain text.
-            // Eye toggle reveals it only on explicit user action.
             visualTransformation = if (showApiKey) VisualTransformation.None
             else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -246,6 +285,53 @@ fun CloudSettingsPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
                 }
             }
         )
+
+        HorizontalDivider(color = TeslaGrey, thickness = 1.dp)
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = settings.fallbackEnabled,
+                onCheckedChange = { onUpdate(settings.copy(fallbackEnabled = it)) },
+                colors = CheckboxDefaults.colors(checkedColor = TeslaWhite, uncheckedColor = TeslaGrey, checkmarkColor = TeslaBlack)
+            )
+            Text("ENABLE_SECONDARY_FALLBACK", fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+        }
+
+        if (settings.fallbackEnabled) {
+            OutlinedTextField(
+                value = settings.secondaryBaseUrl,
+                onValueChange = { onUpdate(settings.copy(secondaryBaseUrl = it)) },
+                label = { Text("SECONDARY_BASE_URL", fontFamily = FontFamily.Monospace) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = textFieldColors,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace)
+            )
+            OutlinedTextField(
+                value = settings.secondaryModelName,
+                onValueChange = { onUpdate(settings.copy(secondaryModelName = it)) },
+                label = { Text("SECONDARY_MODEL", fontFamily = FontFamily.Monospace) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = textFieldColors,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace)
+            )
+            var showSecondaryKey by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = settings.secondaryApiKey,
+                onValueChange = { onUpdate(settings.copy(secondaryApiKey = it)) },
+                label = { Text("SECONDARY_API_KEY", fontFamily = FontFamily.Monospace) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = textFieldColors,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
+                visualTransformation = if (showSecondaryKey) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { showSecondaryKey = !showSecondaryKey }) {
+                        Icon(if (showSecondaryKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, null, tint = TeslaLightGrey)
+                    }
+                }
+            )
+        }
+
         val scope = rememberCoroutineScope()
         OutlinedButton(
             onClick = {
@@ -306,7 +392,6 @@ fun LocalSettingsPanel(settings: AiSettings, navController: NavController, onUpd
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        EngineLogConsole()
         OutlinedTextField(
             value = settings.localModelPath,
             onValueChange = { onUpdate(settings.copy(localModelPath = it)) },
@@ -367,6 +452,99 @@ fun LocalSettingsPanel(settings: AiSettings, navController: NavController, onUpd
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = TeslaGrey
+        )
+    }
+}
+
+@Composable
+fun ParametersPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = TeslaWhite,
+        unfocusedBorderColor = TeslaGrey,
+        focusedLabelColor = TeslaWhite,
+        unfocusedLabelColor = TeslaLightGrey,
+        cursorColor = TeslaWhite,
+        focusedTextColor = TeslaWhite,
+        unfocusedTextColor = TeslaLightGrey,
+        focusedContainerColor = TeslaBlack,
+        unfocusedContainerColor = TeslaBlack
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(
+            text = "// GENERATION PARAMETERS",
+            style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Monospace,
+            color = TeslaLightGrey
+        )
+
+        // Temperature Slider
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("TEMPERATURE", fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+                Text(String.format(Locale.US, "%.1f", settings.temperature), fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+            }
+            Slider(
+                value = settings.temperature,
+                onValueChange = { onUpdate(settings.copy(temperature = it)) },
+                valueRange = 0f..2f,
+                steps = 20,
+                colors = SliderDefaults.colors(
+                    thumbColor = TeslaWhite,
+                    activeTrackColor = TeslaWhite,
+                    inactiveTrackColor = TeslaGrey
+                )
+            )
+        }
+
+        // Top-P Slider
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("TOP_P", fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+                Text(String.format(Locale.US, "%.1f", settings.topP), fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+            }
+            Slider(
+                value = settings.topP,
+                onValueChange = { onUpdate(settings.copy(topP = it)) },
+                valueRange = 0f..1f,
+                steps = 10,
+                colors = SliderDefaults.colors(
+                    thumbColor = TeslaWhite,
+                    activeTrackColor = TeslaWhite,
+                    inactiveTrackColor = TeslaGrey
+                )
+            )
+        }
+
+        // Max Tokens
+        OutlinedTextField(
+            value = settings.maxTokens.toString(),
+            onValueChange = { newValue ->
+                val intVal = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
+                onUpdate(settings.copy(maxTokens = intVal))
+            },
+            label = { Text("MAX_TOKENS", fontFamily = FontFamily.Monospace) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+
+        // Global System Prompt
+        OutlinedTextField(
+            value = settings.globalSystemPrompt,
+            onValueChange = { onUpdate(settings.copy(globalSystemPrompt = it)) },
+            label = { Text("GLOBAL_SYSTEM_PROMPT (APP-WIDE)", fontFamily = FontFamily.Monospace) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+            colors = textFieldColors,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
+            maxLines = 5
         )
     }
 }
