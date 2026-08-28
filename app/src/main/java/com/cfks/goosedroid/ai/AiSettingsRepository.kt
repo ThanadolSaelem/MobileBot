@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.io.File
 
 enum class AiMode {
     CLOUD_API,
@@ -18,7 +19,9 @@ data class AiSettings(
     val localModelPath: String = "",
     val temperature: Float = 0.7f,
     val topP: Float = 1.0f,
-    val maxTokens: Int = 1024,
+    val topK: Int = 40,
+    val contextLength: Int = 2048,
+    val maxTokens: Int = 512,
     val globalSystemPrompt: String = "",
     val fallbackEnabled: Boolean = false,
     val secondaryApiKey: String = "",
@@ -26,7 +29,7 @@ data class AiSettings(
     val secondaryModelName: String = ""
 )
 
-class AiSettingsRepository(context: Context) {
+class AiSettingsRepository(private val context: Context) {
 
     private val prefs: SharedPreferences
 
@@ -47,14 +50,23 @@ class AiSettingsRepository(context: Context) {
     fun getSettings(): AiSettings {
         val modeStr = prefs.getString("ai_mode", AiMode.CLOUD_API.name) ?: AiMode.CLOUD_API.name
         val mode = try { AiMode.valueOf(modeStr) } catch (e: Exception) { AiMode.CLOUD_API }
+        
+        var localPath = prefs.getString("local_model_path", "") ?: ""
+        if (localPath.isBlank()) {
+            val bundled = File(context.filesDir, "models/SmolLM-135M-Instruct-v0.2-Q4_K_M.gguf")
+            localPath = bundled.absolutePath
+        }
+
         return AiSettings(
             mode = mode,
             cloudApiKey = prefs.getString("cloud_api_key", "") ?: "",
             cloudBaseUrl = prefs.getString("cloud_base_url", "https://api.openai.com/v1/") ?: "https://api.openai.com/v1/",
             cloudModelName = prefs.getString("cloud_model_name", "gpt-4o-mini") ?: "gpt-4o-mini",
-            localModelPath = prefs.getString("local_model_path", "") ?: "",
+            localModelPath = localPath,
             temperature = prefs.getFloat("temperature", 0.7f),
             topP = prefs.getFloat("top_p", 1.0f),
+            topK = prefs.getInt("top_k", 40),
+            contextLength = prefs.getInt("context_length", 2048),
             maxTokens = prefs.getInt("max_tokens", 1024),
             globalSystemPrompt = prefs.getString("global_system_prompt", "") ?: "",
             fallbackEnabled = prefs.getBoolean("fallback_enabled", false),
@@ -73,6 +85,8 @@ class AiSettingsRepository(context: Context) {
             putString("local_model_path", settings.localModelPath)
             putFloat("temperature", settings.temperature)
             putFloat("top_p", settings.topP)
+            putInt("top_k", settings.topK)
+            putInt("context_length", settings.contextLength)
             putInt("max_tokens", settings.maxTokens)
             putString("global_system_prompt", settings.globalSystemPrompt)
             putBoolean("fallback_enabled", settings.fallbackEnabled)

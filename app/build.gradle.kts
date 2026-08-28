@@ -20,7 +20,25 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags("-std=c++17")
+                arguments("-DGGML_OPENMP=OFF", "-DLLAMA_SERVER=OFF", "-DCMAKE_BUILD_TYPE=Release")
+            }
+        }
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

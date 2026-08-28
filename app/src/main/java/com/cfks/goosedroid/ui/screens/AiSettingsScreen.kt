@@ -1,7 +1,10 @@
 package com.cfks.goosedroid.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -11,6 +14,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -47,7 +51,7 @@ val TeslaWhite = Color(0xFFFFFFFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiSettingsScreen(navController: NavController) {
+fun AiSettingsScreen(navController: NavController, viewModel: com.cfks.goosedroid.ui.viewmodel.MainViewModel? = null) {
     val context = LocalContext.current
     val repository = remember { AiSettingsRepository(context) }
     
@@ -87,45 +91,52 @@ fun AiSettingsScreen(navController: NavController) {
                 color = TeslaLightGrey
             )
 
-            // Mode Selection
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // Mode Selection: Switch style
+            Surface(
+                color = TeslaDarkGrey,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, TeslaGrey),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                FilterChip(
-                    selected = settings.mode == AiMode.CLOUD_API,
-                    onClick = { settings = settings.copy(mode = AiMode.CLOUD_API) },
-                    label = { Text("CLOUD_API", fontFamily = FontFamily.Monospace) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = TeslaDarkGrey,
-                        labelColor = TeslaLightGrey,
-                        selectedContainerColor = TeslaWhite,
-                        selectedLabelColor = TeslaBlack
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = TeslaGrey,
-                        selectedBorderColor = TeslaWhite,
-                        enabled = true,
-                        selected = settings.mode == AiMode.CLOUD_API
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = if (settings.mode == AiMode.CLOUD_API) "ENGINE: CLOUD (REMOTE)" else "ENGINE: LOCAL (OFFLINE)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = TeslaWhite
+                        )
+                        Text(
+                            text = if (settings.mode == AiMode.CLOUD_API) "> Using high-performance API" else "> Using on-device GGUF",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = TeslaLightGrey
+                        )
+                    }
+                    Switch(
+                        checked = settings.mode == AiMode.CLOUD_API,
+                        onCheckedChange = { isCloud ->
+                            if (isCloud) {
+                                if (settings.cloudApiKey.isBlank()) {
+                                    AlertBus.show(AlertType.WARNING, "CLOUD NOT CONFIGURED", "Please enter your API Key below.")
+                                }
+                                settings = settings.copy(mode = AiMode.CLOUD_API)
+                            } else {
+                                settings = settings.copy(mode = AiMode.LOCAL_LLAMA)
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = TeslaBlack,
+                            checkedTrackColor = TeslaWhite,
+                            uncheckedThumbColor = TeslaWhite,
+                            uncheckedTrackColor = TeslaGrey
+                        )
                     )
-                )
-                FilterChip(
-                    selected = settings.mode == AiMode.LOCAL_LLAMA,
-                    onClick = { settings = settings.copy(mode = AiMode.LOCAL_LLAMA) },
-                    label = { Text("LOCAL_ONBOARD", fontFamily = FontFamily.Monospace) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = TeslaDarkGrey,
-                        labelColor = TeslaLightGrey,
-                        selectedContainerColor = TeslaWhite,
-                        selectedLabelColor = TeslaBlack
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = TeslaGrey,
-                        selectedBorderColor = TeslaWhite,
-                        enabled = true,
-                        selected = settings.mode == AiMode.LOCAL_LLAMA
-                    )
-                )
+                }
             }
 
             if (settings.mode == AiMode.CLOUD_API) {
@@ -175,6 +186,7 @@ fun AiSettingsScreen(navController: NavController) {
             OutlinedButton(
                 onClick = {
                     repository.saveSettings(settings)
+                    viewModel?.refreshAiMode()
                     EngineLogBus.info("AiSettings", "SETTINGS SAVED (mode=${settings.mode})")
                     AlertBus.show(
                         AlertType.SUCCESS,
@@ -379,6 +391,30 @@ fun CloudSettingsPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LocalSettingsPanel(settings: AiSettings, navController: NavController, onUpdate: (AiSettings) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repository = remember { com.cfks.goosedroid.download.ModelRepository(context) }
+
+    val modelPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let {
+                scope.launch {
+                    EngineLogBus.info("AiSettings", "Importing model file...")
+                    val importedFile = repository.importModelFromUri(it)
+                    if (importedFile != null) {
+                        EngineLogBus.info("AiSettings", "Imported: ${importedFile.name}")
+                        onUpdate(settings.copy(localModelPath = importedFile.absolutePath))
+                        AlertBus.show(AlertType.SUCCESS, "MODEL IMPORTED", importedFile.name)
+                    } else {
+                        EngineLogBus.error("AiSettings", "Failed to import model")
+                        AlertBus.show(AlertType.ERROR, "IMPORT FAILED", "Check logs for details")
+                    }
+                }
+            }
+        }
+    )
+
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = TeslaWhite,
         unfocusedBorderColor = TeslaGrey,
@@ -392,14 +428,30 @@ fun LocalSettingsPanel(settings: AiSettings, navController: NavController, onUpd
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        OutlinedTextField(
-            value = settings.localModelPath,
-            onValueChange = { onUpdate(settings.copy(localModelPath = it)) },
-            label = { Text("GGUF_MODEL_PATH", fontFamily = FontFamily.Monospace) },
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            colors = textFieldColors,
-            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace)
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = settings.localModelPath,
+                onValueChange = { onUpdate(settings.copy(localModelPath = it)) },
+                label = { Text("GGUF_MODEL_PATH", fontFamily = FontFamily.Monospace) },
+                modifier = Modifier.weight(1f),
+                colors = textFieldColors,
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace)
+            )
+            IconButton(
+                onClick = { modelPickerLauncher.launch(arrayOf("*/*")) },
+                modifier = Modifier
+                    .size(56.dp)
+                    .padding(top = 8.dp)
+                    .background(TeslaDarkGrey, RoundedCornerShape(4.dp))
+                    .border(1.dp, TeslaGrey, RoundedCornerShape(4.dp))
+            ) {
+                Icon(Icons.Default.Folder, contentDescription = "Browse", tint = TeslaWhite)
+            }
+        }
         val scope = rememberCoroutineScope()
         OutlinedButton(
             onClick = {
@@ -435,20 +487,8 @@ fun LocalSettingsPanel(settings: AiSettings, navController: NavController, onUpd
         ) {
             Text("TEST_MODEL_READINESS", fontFamily = FontFamily.Monospace)
         }
-        OutlinedButton(
-            onClick = { navController.navigate("model_hub") },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(4.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = TeslaWhite,
-                containerColor = TeslaDarkGrey
-            ),
-            border = androidx.compose.foundation.BorderStroke(1.dp, TeslaWhite)
-        ) {
-            Text("MODEL_HUB (One-Tap Downloads)", fontFamily = FontFamily.Monospace)
-        }
         Text(
-            text = "> NOTE: MODEL DOWNLOAD REQUIRED POST-INSTALL TO COMPLY WITH PLAY STORE 150MB LIMIT.",
+            text = "> NOTE: SELECT A .GGUF MODEL FROM STORAGE OR USE THE BUNDLED ONE.",
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = TeslaGrey
@@ -521,6 +561,42 @@ fun ParametersPanel(settings: AiSettings, onUpdate: (AiSettings) -> Unit) {
                 )
             )
         }
+
+        // Top-K Slider
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("TOP_K", fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+                Text("${settings.topK}", fontFamily = FontFamily.Monospace, color = TeslaWhite, fontSize = 12.sp)
+            }
+            Slider(
+                value = settings.topK.toFloat(),
+                onValueChange = { onUpdate(settings.copy(topK = it.toInt())) },
+                valueRange = 1f..100f,
+                steps = 99,
+                colors = SliderDefaults.colors(
+                    thumbColor = TeslaWhite,
+                    activeTrackColor = TeslaWhite,
+                    inactiveTrackColor = TeslaGrey
+                )
+            )
+        }
+
+        // Context Length
+        OutlinedTextField(
+            value = settings.contextLength.toString(),
+            onValueChange = { newValue ->
+                val intVal = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
+                onUpdate(settings.copy(contextLength = intVal))
+            },
+            label = { Text("CONTEXT_LENGTH", fontFamily = FontFamily.Monospace) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors,
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
 
         // Max Tokens
         OutlinedTextField(

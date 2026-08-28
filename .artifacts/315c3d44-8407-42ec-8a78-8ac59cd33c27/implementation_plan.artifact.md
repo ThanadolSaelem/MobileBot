@@ -1,26 +1,28 @@
-# GooseDroid AI System Upgrade: Full MAID Feature Parity + Memory/RAG/Autonomous
+# AI Desktop Unit System Upgrade: Full MAID Feature Parity + Memory/RAG/Autonomous
 
 ## Goal Description
 
-อัปเกรด MobileBot (GooseDroid) ให้มีฟีเจอร์ครบตามโปรเจกต์ MAID (Mobile-Artificial-Intelligence/maid) ทุกข้อ พร้อมระบบ Memory/RAG/Autonomous จากงานวิจัยก่อนหน้า (PocketSage, LocalMind, Ferry):
+อัปเกรด MobileBot ให้มีฟีเจอร์ครบตามโปรเจกต์ MAID (Mobile-Artificial-Intelligence/maid) ทุกข้อ พร้อมระบบ Memory/RAG/Autonomous เพื่อสร้างยูนิตตัวละครอัจฉริยะบนหน้าจอ:
 
-| MAID Feature | สถานะปัจจุบัน | แผน |
+| Feature | สถานะปัจจุบัน | แผน |
 |---|---|---|
 | Local inference (GGUF via llama.cpp) | ❌ Stub mock | Phase 5 |
-| Remote providers (Anthropic/DeepSeek/Mistral/Novita/Ollama/OpenAI) | ⚠️ OpenAI-compatible เท่านั้น | Phase 3 |
-| One-tap model downloads | ⚠️ DownloadManager พื้นฐาน | Phase 4 |
+| Remote providers (Anthropic/DeepSeek/Mistral/Ollama/OpenAI) | ✅ Done | Phase 3 |
+| One-tap model downloads | ✅ Done | Phase 4 |
 | Bring your own model (GGUF จาก storage) | ❌ | Phase 5 |
-| Conversation management (create/rename/delete/export/import JSON) | ❌ | Phase 1 |
-| Customisable parameters (temp/top-p/top-k/context) | ❌ | Phase 3 |
-| Custom system prompt + persona | ⚠️ persona รายตัวละครเท่านั้น | Phase 3 |
-| Voice output (TTS) | ❌ | Phase 8 |
+| Conversation management | ✅ Done | Phase 1 |
+| Interactive Tutorial (Basic/Advanced) | ❌ | Phase 6 |
+| App Manual (RAG-ready) | ❌ | Phase 6 |
+| Customisable parameters (temp/top-p/context) | ✅ Done | Phase 3 |
+| System Integration & Tools (MCP) | ❌ | Phase 7 |
+| RAG Long-Term Memory (with Manual) | ❌ | Phase 8 |
+| Background Autonomous | ❌ | Phase 9 |
 | Account sync (Supabase) | ❌ | Phase 9 (Optional) |
-| Light/Dark theming | ⚠️ Dark monochrome เท่านั้น | Phase 0 |
 
 > [!IMPORTANT]
 > **ข้อจำกัด UI (บังคับสูงสุด)**: ทุกหน้าจอ/Component ใช้ Monochrome Palette
 > (`Tdsm*`) — ดำ, ขาว, เทา เท่านั้น **ห้ามมีสีฉูดฉาด**
-> Light/Dark mode = กลับขั้ว palette เท่านั้น (ไม่ใช้ Material You dynamic color)
+> **Mascot Neutral**: แผนงานนี้ออกแบบมาให้รองรับตัวละคร (Units) หลากหลายรูปแบบ ไม่จำกัดเฉพาะห่าน (Goose)
 
 ## User Review Required
 
@@ -146,31 +148,65 @@ fun generateStream(...): Flow<String>   // token-by-token (SSE)
 #### [MODIFY] ModelHubScreen + ui/screens/components/BYOMCard.kt
 - "Import GGUF" → SAF `ACTION_OPEN_DOCUMENT` copy เข้า models dir → READY
 
-#### [MODIFY] app/build.gradle.kts
-- `externalNativeBuild { cmake }`, `abiFilters += "arm64-v8a"`
+---
 
-### Phase 6 — RAG Long-Term Memory
+### Phase 6 — Interactive Tutorial & Help System
+
+#### [NEW] ui/components/TutorialOverlay.kt
+- ระบบ Coachmark (จุดเน้นสีขาว/เทา) เพื่อสอนการใช้งานทีละขั้นตอน
+- **Basic Level (Auto-start on first launch)**:
+    - การใช้ Collapsible Menu
+    - การสร้างตัวละคร (Studio Editor)
+    - การ Edit/Delete
+    - การดาวน์โหลดโมเดลพื้นฐาน
+- **Advanced Level (Optional via Help button)**:
+    - การตั้งค่า Cloud API
+    - การตั้งค่า Generation Parameters (Temp/Top-P)
+
+#### [NEW] assets/manual.md
+- คู่มือการใช้งานอย่างละเอียดในรูปแบบ Markdown (โครงสร้างเตรียมพร้อมสำหรับ RAG)
+
+#### [MODIFY] ui/screens/PlaygroundScreen.kt
+- เพิ่ม **Help Button** (ไอคอนคำถาม) ในหน้าจอเพื่อเข้าถึง:
+    - ปุ่ม Restart Tutorial (เลือกความลึกได้)
+    - หน้าเปิดดู App Manual
+
+---
+
+### Phase 7 — System Integration & Automation (Smart Units)
+
+#### [NEW] plugins/SystemToolRegistry.kt
+- ลงทะเบียน Native Tools ให้ AI เรียกใช้:
+    - `launch_app(package_name)`: เปิดแอปในเครื่อง
+    - `set_brightness(level)`, `set_volume(level)`: ควบคุมระบบ
+    - `get_battery_status()`: รายงานสถานะเครื่อง
+
+#### [MODIFY] services/GooseAccessibilityService.kt
+- อัปเกรดระบบตรวจจับ Content บนหน้าจอ (Screen Awareness)
+- ส่ง "Screen Context" ไปให้ AI เมื่อผู้ใช้ถามเกี่ยวกับสิ่งที่เห็นบนจอ
+
+---
+
+### Phase 8 — RAG Long-Term Memory & Manual Intelligence
 
 #### [NEW] ai/embedding/EmbeddingEngine.kt
 - MiniLM-L6-v2 TFLite (~23MB ดาวน์โหลดผ่านระบบ Phase 4) → FloatArray(384)
 
-#### [MODIFY] data/local/ (memory_facts table + BLOB vector)
 #### [NEW] brain/RagRetriever.kt
-- Extract facts (LLM) → embed → cosine top-K → ยัด "RELEVANT MEMORIES" ใน prompt
+- **Multi-Source RAG**:
+    - Source 1: User Conversation Facts (จำเรื่องที่เคยคุย)
+    - Source 2: **App Manual** (ยูนิตสามารถตอบวิธีกดปุ่ม/ตั้งค่าแอปจากคู่มือได้)
+- Extract facts (LLM) → embed → cosine top-K → ยัด "RELEVANT CONTEXT" ใน prompt
 
-### Phase 7 — Background Autonomous (WorkManager)
+---
+
+### Phase 9 — Background Autonomous (WorkManager)
 
 #### [NEW] services/ProactiveThoughtWorker.kt
 - PeriodicWork 15 นาที: เลือกตัวละคร → LLM สร้างคำพูด proactive → broadcast OverlayService
 #### [MODIFY] AiSettingsScreen — toggle "Autonomous Mode" (monochrome switch)
 
-### Phase 8 — Voice Output (TTS)
-
-#### [NEW] voice/TtsManager.kt
-- `android.speech.tts.TextToSpeech`, queue ประโยค speech จาก directive
-- Toggle ใน settings + ปุ่ม speaker ใน ChatScreen (icon ขาว/เทา)
-
-### Phase 9 — Account Sync (OPTIONAL)
+### Phase 10 — Account Sync (OPTIONAL)
 
 #### [NEW] data/sync/SupabaseSyncRepository.kt
 - `supabase-kt`: Auth (register/login) + Postgrest backup chats/settings
@@ -226,16 +262,12 @@ graph TB
 - Build: `gradle_build(":app:assembleDebug")` ทุก Phase; Phase 5 เพิ่ม check `.so` ถูก pack
 
 ### Manual (Device/Emulator arm64)
-1. P0: สลับ system dark↔light → ทุกหน้ายัง monochrome ถูกขั้ว ✓
-2. P1: สร้าง/เปลี่ยนชื่อ/ลบ/export/import แชท, ปิดแอปเปิดใหม่ประวัติอยู่
-3. P2: คุย >40 msg → summary ถูกสร้าง, context ไม่ overflow
-4. P3: สลับ provider ทุกตัว (Ollama local, DeepSeek, Anthropic) → ตอบได้ + ตัวอักษรไหลทีละ token
-5. P4: ดาวน์โหลดโมเดล เห็น %/speed, cancel, resume จาก network หลุด
-6. P5: โหลด Qwen-0.5B GGUF → ตอบจริงบนเครื่อง offline, BYOM import ไฟล์เอง
-7. P6: เล่า "แพ้กุ้ง" → ปิดแอป → ถามเมนูเย็นนี้ → AI เตือนเรื่องแพ้
-8. P7: เปิด Autonomous → รอ 15 นาที → sprite ทักเอง
-9. P8: เปิดเสียง → AI พูดตอบ (TTS)
-10. **ทุก Phase**: audit UI ทั้งแอป = ดำ/ขาว/เทาเท่านั้น
+1. P0-P4: COMPLETED.
+2. P5: โหลด Qwen-0.5B GGUF → ตอบจริงบนเครื่อง offline, BYOM import ไฟล์เอง
+3. P6: สั่ง "เปิด YouTube" → AI เรียกใช้ tool และเปิดแอปได้จริง / ถาม "หน้าจอนี้คืออะไร" → AI ตอบถูก
+4. P7: เล่า "แพ้กุ้ง" → ปิดแอป → ถามเมนูเย็นนี้ → AI เตือนเรื่องแพ้
+5. P8: เปิด Autonomous → รอ 15 นาที → ยูนิตบนจอทักเอง
+6. **ทุก Phase**: audit UI ทั้งแอป = ดำ/ขาว/เทาเท่านั้น และไม่มีการอ้างอิงถึงชื่อแอปหรือ Mascot เดิมในส่วนที่เป็น Core Logic
 
 ### Execution Order
 P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → (P9 เมื่อ confirm)

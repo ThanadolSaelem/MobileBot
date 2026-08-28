@@ -31,7 +31,6 @@ import com.cfks.goosedroid.ui.screens.ConversationsScreen
 import com.cfks.goosedroid.ui.screens.EditorScreen
 import com.cfks.goosedroid.ui.screens.PlaygroundScreen
 import com.cfks.goosedroid.ui.screens.AiSettingsScreen
-import com.cfks.goosedroid.ui.screens.ModelHubScreen
 import com.cfks.goosedroid.ui.theme.GooseDesktopTheme
 import com.cfks.goosedroid.ui.alert.AppAlertHost
 import com.cfks.goosedroid.notify.SystemNotifier
@@ -46,6 +45,7 @@ class MainActivity : ComponentActivity() {
         SystemNotifier.ensureChannels(this)
         checkPermissions()
         handleIntent(intent)
+        
         setContent {
             GooseDesktopTheme {
                 Surface(
@@ -104,7 +104,6 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
                 viewModel = viewModel,
                 onNavigateToSettings = { navController.navigate("settings") },
                 onNavigateToChatHub = { navController.navigate("chat_hub") },
-                onNavigateToModelHub = { navController.navigate("model_hub") },
                 onNavigateToEditor = { charId -> 
                     if (charId != null) {
                         navController.navigate("editor?id=$charId")
@@ -158,10 +157,7 @@ fun AppNavigation(viewModel: MainViewModel, activity: ComponentActivity) {
             )
         }
         composable("settings") {
-            AiSettingsScreen(navController = navController)
-        }
-        composable("model_hub") {
-            ModelHubScreen(navController = navController)
+            AiSettingsScreen(navController = navController, viewModel = viewModel)
         }
         composable(
             "chat/{name}?convId={convId}",

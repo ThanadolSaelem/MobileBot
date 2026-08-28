@@ -1,8 +1,5 @@
-// llama-mobile.cpp — JNI bridge สำหรับ MobileBot PetLlama
-// โครงสร้าง port จาก llama.cpp v0.2.0 examples/llama.android/lib (ai_chat.cpp)
-// ปรับเป็น single-shot generate: ทุก call เคลียร์ state ใหม่ (stateless ต่อ request)
-//
-// Java binding: com.cfks.goosedroid.GooseDesktop.PetLlama
+// Java binding: com.cfks.goosedroid.ai.local.LlamaBridge
+// Robust implementation using llama.h (v0.2.0+)
 
 #include <jni.h>
 #include <android/log.h>
@@ -10,12 +7,11 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <chrono>
 
 #include "llama.h"
-#include "common.h"
-#include "sampling.h"
 
-#define TAG "PetLlama"
+#define TAG "LlamaBridge"
 #define LOGi(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGe(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
@@ -23,170 +19,264 @@ static llama_model       * g_model   = nullptr;
 static llama_context     * g_context = nullptr;
 static std::mutex          g_mutex;
 static std::atomic<bool>   g_abort{false};
-
-static void android_log_callback(ggml_log_level level, const char * text, void * /*user*/) {
-    if (level == GGML_LOG_LEVEL_ERROR) LOGe("ggml: %s", text);
-}
+static bool                g_backends_initialized = false;
 
 static void jni_throw(JNIEnv * env, const char * msg) {
     jclass ex = env->FindClass("java/lang/IllegalStateException");
     if (ex) env->ThrowNew(ex, msg);
 }
 
+// UTF-8 validation helper
+static bool is_valid_utf8(const char* str, size_t len) {
+    for (size_t i = 0; i < len; ) {
+        unsigned char c = str[i];
+        if (c < 0x80) { i += 1; continue; }
+        size_t remaining = len - i;
+        if (remaining < 2) return false;
+        if ((c & 0xE0) == 0xC0) {
+            if ((str[i+1] & 0xC0) != 0x80) return false;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            if (remaining < 3) return false;
+            if ((str[i+1] & 0xC0) != 0x80 || (str[i+2] & 0xC0) != 0x80) return false;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (remaining < 4) return false;
+            if ((str[i+1] & 0xC0) != 0x80 || (str[i+2] & 0xC0) != 0x80 || (str[i+3] & 0xC0) != 0x80) return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Safe NewStringUTF that replaces invalid UTF-8 with replacement character
+static jstring safeNewStringUTF(JNIEnv* env, const std::string& s) {
+    if (is_valid_utf8(s.c_str(), s.size())) {
+        return env->NewStringUTF(s.c_str());
+    }
+    // Replace invalid sequences with replacement character
+    std::string clean;
+    clean.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ) {
+        unsigned char c = s[i];
+        if (c < 0x80) {
+            clean.push_back(c);
+            i += 1;
+        } else {
+            size_t remaining = s.size() - i;
+            bool valid = false;
+            size_t seqlen = 0;
+            if ((c & 0xE0) == 0xC0 && remaining >= 2) {
+                if ((s[i+1] & 0xC0) == 0x80) { valid = true; seqlen = 2; }
+            } else if ((c & 0xF0) == 0xE0 && remaining >= 3) {
+                if ((s[i+1] & 0xC0) == 0x80 && (s[i+2] & 0xC0) == 0x80) { valid = true; seqlen = 3; }
+            } else if ((c & 0xF8) == 0xF0 && remaining >= 4) {
+                if ((s[i+1] & 0xC0) == 0x80 && (s[i+2] & 0xC0) == 0x80 && (s[i+3] & 0xC0) == 0x80) { valid = true; seqlen = 4; }
+            }
+            if (valid) {
+                clean.append(s.substr(i, seqlen));
+                i += seqlen;
+            } else {
+                clean.append("\xEF\xBF\xBD"); // UTF-8 replacement character
+                i += 1;
+            }
+        }
+    }
+    return env->NewStringUTF(clean.c_str());
+}
+
 // ---------------------------------------------------------------- init/load
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_nativeInit(JNIEnv * env, jclass, jstring nativeLibDir) {
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_nativeInit(JNIEnv *, jclass, jstring) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    llama_log_set(android_log_callback, nullptr);
-
-    const auto * dir = env->GetStringUTFChars(nativeLibDir, nullptr);
-    ggml_backend_load_all_from_path(dir);   // load CPU backend variants shipped in apk
-    env->ReleaseStringUTFChars(nativeLibDir, dir);
-
-    llama_backend_init();
-    LOGi("backends initialised");
+    if (!g_backends_initialized) {
+        llama_backend_init();
+        g_backends_initialized = true;
+        LOGi("llama.cpp backends initialized");
+    }
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_loadModel(
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_loadModel(
         JNIEnv * env, jclass,
         jstring jmodel_path, jint n_ctx, jint n_threads) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_model || !g_context) { /* fallthrough to fresh load */ }
+
     if (g_context) { llama_free(g_context); g_context = nullptr; }
     if (g_model)   { llama_model_free(g_model); g_model = nullptr; }
 
     const auto * path = env->GetStringUTFChars(jmodel_path, nullptr);
-    LOGi("loading model: %s", path);
+    LOGi("Loading model: %s", path);
+
     llama_model_params mparams = llama_model_default_params();
-    // use mmap — RAM-friendly on mobile (lazy paging) [v0.2.0 API]
-    mparams.load_mode = LLAMA_LOAD_MODE_MMAP;
+    // Use ARM optimizations if available
+
     auto * model = llama_model_load_from_file(path, mparams);
     env->ReleaseStringUTFChars(jmodel_path, path);
-    if (!model) { LOGe("model load FAILED"); return JNI_FALSE; }
-    g_model = model;
 
-    int n_ctx_train = llama_model_n_ctx_train(model);
-    if (n_ctx > n_ctx_train) {
-        LOGi("clamping ctx %d -> trained %d", n_ctx, n_ctx_train);
-        n_ctx = n_ctx_train;
+    if (!model) {
+        LOGe("Failed to load model from file");
+        return JNI_FALSE;
     }
+    g_model = model;
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx            = (uint32_t) n_ctx;
-    cparams.n_batch          = 512;
-    cparams.n_ubatch         = 512;
     cparams.n_threads        = n_threads;
     cparams.n_threads_batch  = n_threads;
-    g_context = llama_init_from_model(model, cparams);
-    if (!g_context) { LOGe("context init FAILED"); return JNI_FALSE; }
+    cparams.n_batch          = 512;
 
-    LOGi("model ready (ctx=%d threads=%d)", n_ctx, n_threads);
+    g_context = llama_init_from_model(model, cparams);
+    if (!g_context) {
+        LOGe("Failed to init context");
+        llama_model_free(g_model);
+        g_model = nullptr;
+        return JNI_FALSE;
+    }
+
+    LOGi("Model ready: ctx=%u, threads=%d", n_ctx, n_threads);
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_freeModel(JNIEnv *, jclass) {
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_freeModel(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_context) { llama_free(g_context); g_context = nullptr; }
     if (g_model)   { llama_model_free(g_model); g_model = nullptr; }
-    LOGi("model freed");
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_stopCompletion(JNIEnv *, jclass) {
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_stopCompletion(JNIEnv *, jclass) {
     g_abort = true;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_systemInfo(JNIEnv * env, jclass) {
-    return env->NewStringUTF(llama_print_system_info());
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_systemInfo(JNIEnv * env, jclass) {
+    return env->NewStringUTF(llama_version());
 }
 
 // ---------------------------------------------------------------- generate
 
-// single-shot: tokenize full chatml prompt -> decode -> sample loop -> string
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_cfks_goosedroid_GooseDesktop_PetLlama_nativeGenerate(
+Java_com_cfks_goosedroid_ai_local_LlamaBridge_nativeGenerateStream(
         JNIEnv * env, jclass,
-        jstring jprompt, jint max_tokens, jfloat temp, jfloat repeat_penalty) {
+        jstring jprompt, jint max_tokens, jfloat temp, jfloat top_p, jint top_k, jfloat repeat_penalty,
+        jobject jcallback) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_model || !g_context) { jni_throw(env, "model not loaded"); return nullptr; }
-
-    const auto * prompt = env->GetStringUTFChars(jprompt, nullptr);
-    std::string formatted(prompt);
-    env->ReleaseStringUTFChars(jprompt, prompt);
-
-    const llama_vocab * vocab = llama_model_get_vocab(g_model);
-
-    // tokenize without BOS/add-special (prompt already fully formatted chatml)
-    int n_prompt = -llama_tokenize(vocab, formatted.c_str(), (int32_t) formatted.size(),
-                                   nullptr, 0, false, false);
-    if (n_prompt < 0) { jni_throw(env, "tokenize failed"); return nullptr; }
-    std::vector<llama_token> tokens(n_prompt);
-    if (llama_tokenize(vocab, formatted.c_str(), (int32_t) formatted.size(),
-                       tokens.data(), (int32_t) tokens.size(), false, false) < 0) {
-        jni_throw(env, "tokenize failed");
+    if (!g_model || !g_context) {
+        jni_throw(env, "Model/Context not initialized");
         return nullptr;
     }
 
-    const uint32_t n_ctx = llama_n_ctx(g_context);
-    if ((uint32_t)(n_prompt + max_tokens + 8) > n_ctx) {
-        jni_throw(env, ("context overflow: prompt=" + std::to_string(n_prompt)
-                + " ctx=" + std::to_string(n_ctx)).c_str());
-        return nullptr;
+    jmethodID mid_onToken = nullptr;
+    if (jcallback) {
+        jclass cbClass = env->GetObjectClass(jcallback);
+        mid_onToken = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V");
     }
 
-    // sampler chain: penalties + temp/dist (ตาม settings ที่พิสูจน์แล้วจาก fc_test.py)
-    common_params_sampling sparams;
-    sparams.temp          = temp;
-    sparams.penalty_repeat = repeat_penalty;
-    sparams.penalty_last_n = 64;
-    common_sampler * smpl = common_sampler_init(g_model, sparams);
-    if (!smpl) { jni_throw(env, "sampler init failed"); return nullptr; }
+    const auto * prompt_str = env->GetStringUTFChars(jprompt, nullptr);
+    std::string prompt(prompt_str);
+    env->ReleaseStringUTFChars(jprompt, prompt_str);
 
-    // decode prompt
-    llama_batch batch = llama_batch_get_one(tokens.data(), (int32_t) tokens.size());
+    const auto * vocab = llama_model_get_vocab(g_model);
+
+    // 1. Tokenize prompt
+    std::vector<llama_token> tokens(prompt.size() + 8);
+    int n_prompt = llama_tokenize(vocab, prompt.c_str(), (int32_t) prompt.size(),
+                                   tokens.data(), (int32_t) tokens.size(), true, true);
+    if (n_prompt < 0) {
+        tokens.resize(-n_prompt);
+        n_prompt = llama_tokenize(vocab, prompt.c_str(), (int32_t) prompt.size(),
+                                   tokens.data(), (int32_t) tokens.size(), true, true);
+    }
+    if (n_prompt <= 0) return env->NewStringUTF("");
+    tokens.resize(n_prompt);
+
+    // 2. Reset KV cache for sequence 0
+    llama_memory_seq_rm(llama_get_memory(g_context), 0, -1, -1);
+
+    // 3. Decode prompt in one batch
+    llama_batch batch = llama_batch_init(n_prompt, 0, 1);
+    batch.n_tokens = n_prompt;
+    for (int i = 0; i < n_prompt; i++) {
+        batch.token[i] = tokens[i];
+        batch.pos[i]   = i;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i] = (i == n_prompt - 1); // Only logits for the last token
+    }
+
+    if (llama_decode(g_context, batch)) {
+        LOGe("llama_decode prompt failed");
+        llama_batch_free(batch);
+        return env->NewStringUTF("Error: Initial decode failed");
+    }
+    llama_batch_free(batch);
+
+    // 4. Initialize samplers
+    auto sparams = llama_sampler_chain_default_params();
+    llama_sampler * smpl = llama_sampler_chain_init(sparams);
+
+    // Chain samplers in recommended order
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(top_k));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(top_p, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    // 5. Generation loop
     g_abort = false;
-    std::string out;
-    out.reserve(max_tokens * 3);   // Thai ~3 bytes/char
+    std::string response;
+    batch = llama_batch_init(1, 0, 1);
+
+    // First token is sampled from prompt logits
+    llama_token id = llama_sampler_sample(smpl, g_context, -1);
+
+    auto t_start = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < max_tokens; i++) {
-        if (g_abort) break;
+        if (g_abort || llama_vocab_is_eog(vocab, id)) break;
 
-        int n_eval = (int) tokens.size() > 0 ? (int) tokens.size() : 1;
-        if (llama_decode(g_context, batch)) {
-            common_sampler_free(smpl);
-            jni_throw(env, "decode failed");
-            return nullptr;
-        }
-        tokens.clear();   // prompt decoded once; subsequent loops eval 1 token
-
-        llama_token id = common_sampler_sample(smpl, g_context, -1);
-        common_sampler_accept(smpl, id, true);
-
-        if (llama_vocab_is_eog(vocab, id)) break;
-
-        char piece[64];
+        // Convert to piece and notify Java
+        char piece[256];
         int n = llama_token_to_piece(vocab, id, piece, sizeof(piece), 0, true);
-        if (n > 0) out.append(piece, (size_t) n);
-
-        // stop at end-of-turn marker (chatml) — model sometimes emits raw
-        if (out.find("<|im_end|>") != std::string::npos) {
-            out.resize(out.find("<|im_end|>"));
-            break;
+        if (n > 0) {
+            std::string s(piece, (size_t) n);
+            response += s;
+            if (jcallback && mid_onToken) {
+                jstring js = safeNewStringUTF(env, s);
+                env->CallVoidMethod(jcallback, mid_onToken, js);
+                env->DeleteLocalRef(js);
+            }
         }
 
-        batch = llama_batch_get_one(&id, 1);
+        // Stop sequences
+        if (response.find("<|im_end|>") != std::string::npos) break;
+
+        // Decode the sampled token
+        batch.n_tokens = 1;
+        batch.token[0]  = id;
+        batch.pos[0]    = n_prompt + i;
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = true;
+
+        if (llama_decode(g_context, batch)) break;
+
+        llama_sampler_accept(smpl, id);
+        id = llama_sampler_sample(smpl, g_context, -1);
     }
 
-    common_sampler_free(smpl);
+    auto t_end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+    LOGi("Stream generated %d tokens in %.1f ms (%.2f t/s)", (int)response.size(), ms, (response.size() / (ms / 1000.0)));
 
-    // clear KV cache so next single-shot request starts clean
-    llama_memory_clear(llama_get_memory(g_context), true);
+    llama_sampler_free(smpl);
+    llama_batch_free(batch);
 
-    return env->NewStringUTF(out.c_str());
+    return safeNewStringUTF(env, response);
 }
