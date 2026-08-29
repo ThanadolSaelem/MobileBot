@@ -23,8 +23,9 @@ class WebDropZonePlugin : UnitPlugin {
         
         return when (action) {
             "start" -> {
+                android.util.Log.d("WebDropZonePlugin", "Starting drop zone server...")
                 val url = WebDropZoneServer.startServer(context)
-                "Server started. Tell the user exactly this message: 'Please go to this URL on your PC or other device to send me the file: \$url (The link expires in 60 seconds)'"
+                "Server started. Tell the user exactly this message: 'Please go to this URL on your PC or other device to send me the file: $url (The link expires in 60 seconds)'"
             }
             else -> "Error: Unknown action '\$action'."
         }

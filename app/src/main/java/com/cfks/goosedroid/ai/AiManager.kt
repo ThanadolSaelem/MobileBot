@@ -9,20 +9,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.scan
 import kotlinx.serialization.json.Json
 
 class AiManager(private val context: Context) {
-    
+
     private val repository = AiSettingsRepository(context)
     val toolRegistry = ToolRegistry() // MCP-Lite Registry
-    
+
     // Configured Json parser that ignores unknown keys
-    private val jsonParser = Json { 
-        ignoreUnknownKeys = true 
+    private val jsonParser = Json {
+        ignoreUnknownKeys = true
         isLenient = true
     }
 
@@ -38,8 +36,23 @@ class AiManager(private val context: Context) {
         }
         return when (settings.mode) {
             AiMode.CLOUD_API -> CloudAiEngine(settings)
-            AiMode.LOCAL_LLAMA -> LocalAiEngine(settings)
+            AiMode.LOCAL_LLAMA -> LocalAiEngine(settings, context)
         }
+    }
+
+    /**
+     * Build a safe fallback directive when JSON parsing fails.
+     */
+    private fun safeFallback(message: String, e: Throwable? = null): OverlayLlmDirective {
+        if (e != null) {
+            EngineLogBus.warn("AiManager", "Fallback response: ${e.message?.take(140)}")
+        }
+        return OverlayLlmDirective(
+            action = "IDLE",
+            speech = message,
+            targetDx = 0f,
+            targetDy = 0f
+        )
     }
 
     suspend fun getNextAction(
@@ -53,62 +66,79 @@ class AiManager(private val context: Context) {
         val baseRole = if (characterPersona.isNotBlank()) {
             "You are $characterName. $characterPersona"
         } else {
-            "You are $characterName, an autonomous desktop unit operating on the user's screen."
+            "You are $characterName, an AI desktop pet."
         }
-        
+
+        val historyLimit = if (settings.mode == AiMode.LOCAL_LLAMA) 500 else 1500
         val recentHistory = if (conversationId != null) {
-            // Phase 2: Room-backed memory (summaries + sliding window)
             MemoryManager.buildContext(ChatRepository(context), conversationId).promptBlock
         } else {
-            // Overlay/inline paths without a conversation still get in-RAM context
             com.cfks.goosedroid.brain.CharacterRegistry.getInteractionContext(characterName)
+        }.take(historyLimit)
+
+        val toolPrompt = if (settings.mode == AiMode.CLOUD_API) {
+            toolRegistry.getPromptDescription()
+        } else ""
+
+
+        val localPromptPrefix = if (settings.mode == AiMode.LOCAL_LLAMA) {
+            "user: hi\nassistant: {\"thought\":\"greeting\",\"speech\":\"Hello! How can I help you today?\",\"action\":\"JUMP\"}\nuser: what can you do?\nassistant: {\"thought\":\"info\",\"speech\":\"I can walk around your screen, open apps, and chat with you!\",\"action\":\"WALK\"}\nuser: "
+        } else ""
+
+        val toolInstruction = "Only call web_drop_zone if user explicitly says they want to send/upload a file. For normal chat, do NOT call any tool. Reply naturally in JSON format with action=IDLE."
+
+        val systemPrompt = if (settings.mode == AiMode.LOCAL_LLAMA) {
+            "You are an AI pet. Reply ONLY JSON. Keys: thought, speech, action, tool_call. Match the language of the user's input. $toolInstruction"
+        } else {
+            """
+                $baseRole
+                $toolInstruction
+                RECENT CONVERSATION HISTORY:
+                $recentHistory
+                $toolPrompt
+                Respond in JSON ONLY:
+                {
+                    "thought": "brief reasoning",
+                    "speech": "your reply text",
+                    "action": "One of: IDLE, WALK, RUN, JUMP",
+                    "tool_call": { "name": "tool_name", "args": { "key": "value" } }
+                }
+                No markdown.
+            """.trimIndent()
         }
 
-        val toolPrompt = toolRegistry.getPromptDescription()
-
-        val systemPrompt = """
-            $baseRole
-            
-            RECENT CONVERSATION HISTORY (Use this context for multi-turn replies):
-            $recentHistory
-
-            $toolPrompt
-
-            Respond to the user's command by deciding your action and speech.
-            Always reply in the following JSON format ONLY:
-            {
-                "thought": "Your internal reasoning or diagnostic",
-                "speech": "What you output to the user (matching your persona/role)",
-                "action": "One of: IDLE, WALK, RUN, JUMP",
-                "moveset_name": "Optional exact animation name if needed",
-                "direction_x": Float (horizontal velocity, negative is left, positive is right),
-                "direction_y": Float (vertical velocity, negative is up, positive is down),
-                "duration_frames": Integer (how long the action lasts, e.g. 180 frames = 3 seconds),
-                "tool_call": { "name": "tool_name", "args": { "param": "value" } } // Optional. Provide if using a tool.
-            }
-            Do not output any markdown formatting, only pure JSON.
-        """.trimIndent()
-
         val engine = getEngine()
+        val finalPrompt = localPromptPrefix + prompt
+
         val jsonString = try {
-            engine.generateActionJson(prompt, systemPrompt, conversationId)
+            engine.generateActionJson(finalPrompt, systemPrompt, conversationId)
         } catch (e: Exception) {
             if (repository.getSettings().fallbackEnabled) {
                 EngineLogBus.warn("AiManager", "PRIMARY FAILED -> FALLBACK: ${e.message}")
-                getEngine(true).generateActionJson(prompt, systemPrompt, conversationId)
-            } else throw e
+                try {
+                    getEngine(true).generateActionJson(finalPrompt, systemPrompt, conversationId)
+                } catch (e2: Exception) {
+                    return safeFallback("AI engine unavailable: ${e2.message?.take(80) ?: "unknown error"}", e2)
+                }
+            } else {
+                return safeFallback("AI engine unavailable: ${e.message?.take(80) ?: "unknown error"}", e)
+            }
         }
-        
+
         // Sanitize string if LLM included markdown blocks
         val cleanedJson = jsonString.replace("```json", "").replace("```", "").trim()
-        
+
+        if (cleanedJson.isBlank() || cleanedJson == "{}") {
+            return safeFallback("...")
+        }
+
         val llmResponse = try {
             jsonParser.decodeFromString<LlmResponse>(cleanedJson)
         } catch (e: Exception) {
             EngineLogBus.error("AiManager", "JSON PARSE FAILED: ${e.message?.take(160) ?: "unknown"}")
-            throw e
+            return safeFallback("Could not parse AI response", e)
         }
-        
+
         return OverlayLlmDirective(
             action = llmResponse.action,
             movesetName = llmResponse.moveset_name,
@@ -129,74 +159,105 @@ class AiManager(private val context: Context) {
         conversationId: Long? = null,
     ): Flow<OverlayLlmDirective> {
         val settings = repository.getSettings()
+
         val baseRole = if (characterPersona.isNotBlank()) {
             "You are $characterName. $characterPersona"
         } else {
-            "You are $characterName, an autonomous desktop unit operating on the user's screen."
+            "You are $characterName, an AI desktop pet."
         }
-        
+
+        val historyLimit = if (settings.mode == AiMode.LOCAL_LLAMA) 500 else 1500
         val recentHistory = if (conversationId != null) {
             MemoryManager.buildContext(ChatRepository(context), conversationId).promptBlock
         } else {
             com.cfks.goosedroid.brain.CharacterRegistry.getInteractionContext(characterName)
+        }.take(historyLimit)
+
+        val toolPrompt = if (settings.mode == AiMode.CLOUD_API) {
+            toolRegistry.getPromptDescription()
+        } else ""
+
+        val toolInstruction = "Only call web_drop_zone if user explicitly says they want to send/upload a file. For normal chat, do NOT call any tool. Reply naturally in JSON format with action=IDLE."
+
+        val systemPrompt = if (settings.mode == AiMode.LOCAL_LLAMA) {
+            "You are an AI pet. Reply ONLY JSON. Keys: thought, speech, action, tool_call. Match the language of the user's input. $toolInstruction"
+        } else {
+            """
+                $baseRole
+                $toolInstruction
+                RECENT CONVERSATION HISTORY:
+                $recentHistory
+                $toolPrompt
+                Respond in JSON ONLY:
+                {
+                    "thought": "brief reasoning",
+                    "speech": "your reply text",
+                    "action": "One of: IDLE, WALK, RUN, JUMP",
+                    "tool_call": { "name": "tool_name", "args": { "key": "value" } }
+                }
+                No markdown.
+            """.trimIndent()
         }
 
-        val toolPrompt = toolRegistry.getPromptDescription()
-
-        val systemPrompt = """
-            $baseRole
-            
-            RECENT CONVERSATION HISTORY (Use this context for multi-turn replies):
-            $recentHistory
-
-            $toolPrompt
-
-            Respond to the user's command by deciding your action and speech.
-            Always reply in the following JSON format ONLY:
-            {
-                "thought": "Your internal reasoning or diagnostic",
-                "speech": "What you output to the user (matching your persona/role)",
-                "action": "One of: IDLE, WALK, RUN, JUMP",
-                "moveset_name": "Optional exact animation name if needed",
-                "direction_x": Float,
-                "direction_y": Float,
-                "duration_frames": Integer,
-                "tool_call": { "name": "tool_name", "args": { "param": "value" } }
-            }
-            Do not output any markdown formatting, only pure JSON.
+        val promptPrefix = """
+            user: hi
+            assistant: {"thought":"greeting","speech":"Hello! How can I help you?","action":"JUMP"}
+            user: what can you do?
+            assistant: {"thought":"info","speech":"I can perform actions on your screen and chat with you.","action":"IDLE"}
+            user:
         """.trimIndent()
 
+        val finalPrompt = promptPrefix + prompt
         val engine = getEngine()
-        var receivedAnyData = false
-        
-        return engine.generateActionStream(prompt, systemPrompt, conversationId)
-            .onEach { receivedAnyData = true }
+
+        return engine.generateActionStream(finalPrompt, systemPrompt, conversationId)
             .catch { e ->
-                if (!receivedAnyData) {
-                    EngineLogBus.warn("AiManager", "STREAM FAILED: ${e.message} — TRYING NON-STREAM FALLBACK")
-                    try {
-                        val fullResponse = engine.generateActionJson(prompt, systemPrompt, conversationId)
-                        emit(fullResponse)
-                    } catch (jsonErr: Exception) {
-                        if (repository.getSettings().fallbackEnabled) {
-                            EngineLogBus.warn("AiManager", "FALLBACK FAILED -> SECONDARY ENGINE")
-                            emitAll(getEngine(true).generateActionStream(prompt, systemPrompt, conversationId))
-                        } else throw jsonErr
-                    }
-                } else {
-                    EngineLogBus.error("AiManager", "STREAM INTERRUPTED: ${e.message}")
-                    throw e
-                }
+                EngineLogBus.warn("AiManager", "STREAM ERROR: ${e.message?.take(140)}")
+                // Emit a safe JSON fallback instead of crashing the flow
+                emit("\"thought\":\"error\",\"speech\":\"AI stream failed: ${e.message?.take(60)?.replace("\"", "") ?: "unknown"}\",\"action\":\"IDLE\"")
             }
             .scan("") { accumulated, delta -> accumulated + delta }
+            .onEach { fullString ->
+                if (fullString.length % 50 == 0) { // Log every 50 chars to avoid spam
+                    android.util.Log.d("AiManager", "RAW STREAM: $fullString")
+                }
+            }
             .map { fullString ->
-                val partialSpeech = PartialJsonParser.extractSpeech(fullString)
-                
+                val trimmed = fullString.trim()
+
+                // Find the JSON object by counting braces to handle nesting
+                var cleanString = trimmed
+                val firstBrace = trimmed.indexOf("{")
+                if (firstBrace != -1) {
+                    var braceCount = 0
+                    var lastMatch = -1
+                    for (i in firstBrace until trimmed.length) {
+                        if (trimmed[i] == '{') braceCount++
+                        else if (trimmed[i] == '}') braceCount--
+
+                        if (braceCount == 0) {
+                            lastMatch = i
+                            break
+                        }
+                    }
+                    if (lastMatch != -1) {
+                        cleanString = trimmed.substring(firstBrace, lastMatch + 1)
+                    }
+                }
+
+                val partialSpeech = PartialJsonParser.extractSpeech(cleanString)
+                val finalSpeech = if (partialSpeech.isBlank() && cleanString.isNotBlank() && !cleanString.contains("\"speech\"")) {
+                    // Fallback for non-JSON models: strip ChatML tags
+                    cleanString.replace("\uD83D\uDDE3", "").replace("\uD83D\uDD28", "").trim()
+                } else {
+                    partialSpeech
+                }
+
                 // Try to parse full JSON if it seems complete
-                if (fullString.trim().endsWith("}")) {
+                if (cleanString.endsWith("}")) {
                     try {
-                        val cleaned = fullString.replace("```json", "").replace("```", "").trim()
-                        val res = jsonParser.decodeFromString<LlmResponse>(cleaned)
+                        val sanitized = cleanString.replace("```json", "").replace("```", "").trim()
+                        val res = jsonParser.decodeFromString<LlmResponse>(sanitized)
                         return@map OverlayLlmDirective(
                             action = res.action,
                             movesetName = res.moveset_name,
@@ -212,11 +273,11 @@ class AiManager(private val context: Context) {
                         // Not fully valid yet or failed parse
                     }
                 }
-                
+
                 // Emitting partial directive with current speech
                 OverlayLlmDirective(
                     action = "IDLE", // Default until full JSON parsed
-                    speech = partialSpeech
+                    speech = finalSpeech
                 )
             }
     }

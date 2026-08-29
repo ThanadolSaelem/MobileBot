@@ -88,7 +88,6 @@ fun PlaygroundScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToChat: (String) -> Unit,
     onNavigateToChatHub: () -> Unit = {},
-    onNavigateToModelHub: () -> Unit = {},
     onLaunchOverlay: (PhysicsCharacter) -> Unit
 ) {
     val context = LocalContext.current
@@ -643,9 +642,9 @@ fun PlaygroundScreen(
                                 activeChatChar = char
                                 val customGreeting = char.spriteSheetData.moveSets.firstOrNull { it.dialogue.isNotBlank() }?.dialogue
                                 assistantBubbleText = if (!customGreeting.isNullOrBlank()) {
-                                    "${char.spriteSheetData.name}: $customGreeting"
+                                    customGreeting
                                 } else {
-                                    "${char.spriteSheetData.name}: สวัสดีครับผู้บัญชาการ ${char.spriteSheetData.name} พร้อมรับคำสั่งแล้วครับ"
+                                    "สวัสดีครับผู้บัญชาการ ผม ${char.spriteSheetData.name} พร้อมรับคำสั่งแล้วครับ"
                                 }
                                 userBubbleText = null
                                 chatInputText = ""
@@ -772,6 +771,43 @@ fun PlaygroundScreen(
 
                 // Right: Active Units & Quick Access Hubs
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val aiMode by viewModel.aiMode.collectAsState()
+                    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (aiMode == com.cfks.goosedroid.ai.AiMode.CLOUD_API) Color(0xFF2E2E2E) else Color.Transparent)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .clickable {
+                                if (!viewModel.toggleAiMode()) {
+                                    com.cfks.goosedroid.ui.alert.AlertBus.show(
+                                        com.cfks.goosedroid.ui.alert.AlertType.WARNING,
+                                        "CLOUD NOT READY",
+                                        "Please configure API Key in settings first."
+                                    )
+                                    onNavigateToSettings()
+                                }
+                            }
+                    ) {
+                        Text(
+                            if (aiMode == com.cfks.goosedroid.ai.AiMode.CLOUD_API) "CLOUD" else "LOCAL",
+                            color = if (aiMode == com.cfks.goosedroid.ai.AiMode.CLOUD_API) Color.White else TdsmTextSecondary,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = if (aiMode == com.cfks.goosedroid.ai.AiMode.CLOUD_API) Icons.Default.Cloud else Icons.Default.Dns,
+                            contentDescription = "Toggle AI Mode",
+                            tint = if (aiMode == com.cfks.goosedroid.ai.AiMode.CLOUD_API) Color.White else TdsmTextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
                     Text(
                         "UNITS: ",
                         color = TdsmTextSecondary,
@@ -786,18 +822,6 @@ fun PlaygroundScreen(
                         fontFamily = FontFamily.Monospace
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = onNavigateToModelHub,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Download,
-                            contentDescription = "Model Hub",
-                            tint = TdsmTextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
                     IconButton(
                         onClick = onNavigateToChatHub,
                         modifier = Modifier.size(28.dp)
@@ -1008,19 +1032,6 @@ fun PlaygroundScreen(
                                 contentDescription = "AI Settings",
                                 tint = TdsmTextPrimary,
                                 modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Model Hub Button
-                        IconButton(
-                            onClick = { onNavigateToModelHub() },
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Download,
-                                contentDescription = "Model Hub",
-                                tint = TdsmTextPrimary,
-                                modifier = Modifier.size(22.dp)
                             )
                         }
 
@@ -1419,7 +1430,7 @@ fun PlaygroundScreen(
                                                 delay(250)
                                                 val result = PetBrain.processCommand(context, query, char.spriteSheetData.name)
                                                 isAssistantTyping = false
-                                                assistantBubbleText = "${char.spriteSheetData.name}: ${result.displayReply}"
+                                                assistantBubbleText = result.displayReply
 
                                                 // LLM DIRECTIVE DISPATCH: High priority override on character
                                                 when (result.action.action.lowercase()) {

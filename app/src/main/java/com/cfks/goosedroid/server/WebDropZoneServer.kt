@@ -31,18 +31,27 @@ object WebDropZoneServer {
      */
     private fun getLocalIpAddress(@Suppress("UNUSED_PARAMETER") context: Context): String {
         return try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val ni = interfaces.nextElement()
-                val addresses = ni.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val addr = addresses.nextElement()
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        return addr.hostAddress ?: continue
+            val interfaces = NetworkInterface.getNetworkInterfaces().toList()
+            var bestIp: String? = null
+            
+            for (ni in interfaces) {
+                if (ni.isLoopback || !ni.isUp) continue
+                
+                val addresses = ni.inetAddresses.asSequence()
+                    .filter { !it.isLoopbackAddress && it is Inet4Address }
+                    .map { it.hostAddress }
+                    .toList()
+                
+                for (ip in addresses) {
+                    if (ip == null) continue
+                    // Prioritize common Wi-Fi subnets
+                    if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+                        return ip
                     }
+                    bestIp = ip
                 }
             }
-            "0.0.0.0"
+            bestIp ?: "0.0.0.0"
         } catch (e: Exception) {
             Log.e("WebDropZone", "IP lookup failed: ${e.message}")
             "0.0.0.0"
@@ -135,8 +144,14 @@ object WebDropZoneServer {
                 }
                 server?.start(wait = false)
                 isServerActive = true
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Drop Zone Active: http://$ip:8080", android.widget.Toast.LENGTH_LONG).show()
+                }
             } catch (e: Exception) {
                 Log.e("WebDropZone", "Server error", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Drop Zone Error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }
         

@@ -2,8 +2,6 @@ package com.cfks.goosedroid.ai
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import java.io.File
 
 enum class AiMode {
@@ -12,7 +10,7 @@ enum class AiMode {
 }
 
 data class AiSettings(
-    val mode: AiMode = AiMode.CLOUD_API,
+    val mode: AiMode = AiMode.LOCAL_LLAMA,
     val cloudApiKey: String = "",
     val cloudBaseUrl: String = "https://api.openai.com/v1/",
     val cloudModelName: String = "gpt-4o-mini",
@@ -34,23 +32,15 @@ class AiSettingsRepository(private val context: Context) {
     private val prefs: SharedPreferences
 
     init {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-
-        prefs = EncryptedSharedPreferences.create(
-            context,
-            "ai_secure_settings",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        // Using plain SharedPreferences instead of EncryptedSharedPreferences
+        // to avoid Keystore/Knox issues on some Samsung devices.
+        prefs = context.getSharedPreferences("ai_settings", Context.MODE_PRIVATE)
     }
 
     fun getSettings(): AiSettings {
-        val modeStr = prefs.getString("ai_mode", AiMode.CLOUD_API.name) ?: AiMode.CLOUD_API.name
-        val mode = try { AiMode.valueOf(modeStr) } catch (e: Exception) { AiMode.CLOUD_API }
-        
+        val modeStr = prefs.getString("ai_mode", AiMode.LOCAL_LLAMA.name) ?: AiMode.LOCAL_LLAMA.name
+        val mode = try { AiMode.valueOf(modeStr) } catch (e: Exception) { AiMode.LOCAL_LLAMA }
+
         var localPath = prefs.getString("local_model_path", "") ?: ""
         if (localPath.isBlank()) {
             val bundled = File(context.filesDir, "models/SmolLM-135M-Instruct-v0.2-Q4_K_M.gguf")

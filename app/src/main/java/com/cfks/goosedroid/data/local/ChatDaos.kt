@@ -101,4 +101,7 @@ interface ConversationSummaryDao {
 
     @Insert
     suspend fun insert(summary: ConversationSummaryEntity): Long
+
+    @Query("DELETE FROM conversation_summaries WHERE conversationId = :conversationId")
+    suspend fun deleteByConversation(conversationId: Long)
 }

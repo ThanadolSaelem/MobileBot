@@ -42,10 +42,14 @@ class ToolRegistry {
     }
 
     suspend fun executeTool(context: Context, name: String, args: JsonObject): String {
+        android.util.Log.d("ToolRegistry", "Executing tool: $name with args: $args")
         val plugin = plugins[name] ?: return "Error: Tool '$name' not found."
         return try {
-            plugin.execute(context, args)
+            val result = plugin.execute(context, args)
+            android.util.Log.d("ToolRegistry", "Tool result: $result")
+            result
         } catch (e: Exception) {
+            android.util.Log.e("ToolRegistry", "Tool execution failed", e)
             "Error executing tool '$name': ${e.message}"
         }
     }

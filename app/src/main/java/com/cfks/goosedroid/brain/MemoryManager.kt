@@ -17,9 +17,9 @@ import com.cfks.goosedroid.data.ChatRepository
  */
 object MemoryManager {
 
-    const val WINDOW_SIZE = 20
-    const val SUMMARIZE_THRESHOLD = 40
-    private const val MIN_BATCH = 10
+    const val WINDOW_SIZE = 10
+    const val SUMMARIZE_THRESHOLD = 25
+    private const val MIN_BATCH = 8
 
     data class MemoryContext(
         val promptBlock: String,

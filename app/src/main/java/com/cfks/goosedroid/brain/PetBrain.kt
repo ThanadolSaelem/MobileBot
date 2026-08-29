@@ -39,7 +39,8 @@ object PetBrain {
                         target_dy = directive.targetDy
                     ),
                     displayReply = directive.speech ?: "",
-                    actionBadge = "AI // ${directive.action.uppercase()}"
+                    actionBadge = "AI // ${directive.action.uppercase()}",
+                    toolCall = directive.toolCall
                 )
             }
     }
@@ -60,8 +61,18 @@ object PetBrain {
         
         try {
             val result = processCommandStream(context, trimmed, petName, conversationId).last()
-            CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${result.displayReply}")
-            return@withContext result
+            
+            // Sanitize reply: Remove name prefix if present (e.g. "UNIT-01: Hello" -> "Hello")
+            val escapedName = Regex.escape(petName)
+            val sanitizedReply = result.displayReply
+                .replace("(?i)^$escapedName\\s*[:\\-=>]+\\s*".toRegex(), "")
+                .replace("(?i)^${escapedName.uppercase()}\\s*[:\\-=>]+\\s*".toRegex(), "")
+                .trim()
+            
+            val finalResult = result.copy(displayReply = sanitizedReply)
+            
+            CharacterRegistry.addInteractionLog(petName, "ASSISTANT: ${finalResult.displayReply}")
+            return@withContext finalResult
         } catch (e: Exception) {
             e.printStackTrace()
             android.util.Log.e("PetBrain", "AI Call Failed, falling back to local mocks", e)
@@ -255,5 +266,6 @@ object PetBrain {
 data class LlmActionResult(
     val action: LlmActionJson,
     val displayReply: String,
-    val actionBadge: String
+    val actionBadge: String,
+    val toolCall: com.cfks.goosedroid.ai.ToolCall? = null
 )

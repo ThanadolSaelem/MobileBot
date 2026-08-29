@@ -48,7 +48,14 @@ class ChatRepository(context: Context) {
 
     suspend fun deleteConversation(id: Long) {
         messageDao.deleteByConversation(id)
+        summaryDao.deleteByConversation(id)
         conversationDao.deleteById(id)
+    }
+
+    suspend fun clearMessages(conversationId: Long) {
+        messageDao.deleteByConversation(conversationId)
+        summaryDao.deleteByConversation(conversationId)
+        conversationDao.touch(conversationId)
     }
 
     suspend fun addMessage(

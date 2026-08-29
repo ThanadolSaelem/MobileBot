@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.cfks.goosedroid.model.AnimationSequence
 import com.cfks.goosedroid.model.PhysicsCharacter
 import com.cfks.goosedroid.model.SpriteSheetData
+import com.cfks.goosedroid.ai.AiMode
+import com.cfks.goosedroid.ai.AiSettingsRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,10 @@ class MainViewModel(application: android.app.Application) : androidx.lifecycle.A
 
     private val _customWallpaperUri = MutableStateFlow<String?>(null)
     val customWallpaperUri: StateFlow<String?> = _customWallpaperUri.asStateFlow()
+
+    private val aiSettingsRepository = AiSettingsRepository(context)
+    private val _aiMode = MutableStateFlow(aiSettingsRepository.getSettings().mode)
+    val aiMode: StateFlow<AiMode> = _aiMode.asStateFlow()
 
     init {
         // Load persisted characters initially
@@ -154,6 +160,27 @@ class MainViewModel(application: android.app.Application) : androidx.lifecycle.A
         val masterList = com.cfks.goosedroid.data.CharacterRepository.loadCharacters(context)
         return masterList.find { it.id == id }
     }
+
+    fun toggleAiMode(): Boolean {
+        val currentSettings = aiSettingsRepository.getSettings()
+        val newMode = if (currentSettings.mode == AiMode.CLOUD_API) AiMode.LOCAL_LLAMA else AiMode.CLOUD_API
+        
+        // Validation: If switching to Cloud, check if configured
+        if (newMode == AiMode.CLOUD_API && currentSettings.cloudApiKey.isBlank()) {
+            return false // Not configured
+        }
+        
+        val updated = currentSettings.copy(mode = newMode)
+        aiSettingsRepository.saveSettings(updated)
+        _aiMode.value = newMode
+        showHud("ENGINE MODE: ${newMode.name}")
+        return true
+    }
+
+    fun refreshAiMode() {
+        _aiMode.value = aiSettingsRepository.getSettings().mode
+    }
+
     fun moveCharacterBy(id: String, dx: Float, dy: Float) {
         _physicsCharacters.update { list ->
             list.map { if (it.id == id) it.copy(x = it.x + dx, y = it.y + dy) else it }

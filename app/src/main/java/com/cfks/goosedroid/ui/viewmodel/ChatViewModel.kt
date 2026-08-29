@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.cfks.goosedroid.ai.AiManager
 import com.cfks.goosedroid.ai.ChatEngine
 import com.cfks.goosedroid.ai.EngineLogBus
 import com.cfks.goosedroid.brain.MemoryManager
@@ -113,8 +114,15 @@ class ChatViewModel(
                 ChatEngine.setTyping(convId, true)
                 var assistantMsgId: Long? = null
                 try {
+                    var lastResult: com.cfks.goosedroid.brain.LlmActionResult? = null
+                    var capturedToolCall: com.cfks.goosedroid.ai.ToolCall? = null
+                    
                     PetBrain.processCommandStream(appContext, trimmed, characterName, convId)
                         .collect { result ->
+                            lastResult = result
+                            if (result.toolCall != null) {
+                                capturedToolCall = result.toolCall
+                            }
                             if (assistantMsgId == null) {
                                 assistantMsgId = repo.addMessage(
                                     convId,
@@ -125,13 +133,29 @@ class ChatViewModel(
                                 )
                             } else {
                                 repo.updateMessage(
-                                    assistantMsgId,
+                                    assistantMsgId!!,
                                     result.displayReply,
                                     result.actionBadge
                                 )
                             }
                         }
                     
+                    // Handle Tool Call if present in the stream at any point
+                    val tool = capturedToolCall ?: lastResult?.toolCall
+                    EngineLogBus.debug("ChatViewModel", "Stream finished. capturedToolCall=${tool?.name}")
+                    
+                    tool?.let { t ->
+                        EngineLogBus.info("ChatViewModel", "EXECUTING TOOL: ${t.name}")
+                        val aiManager = AiManager(appContext)
+                        val toolResult = aiManager.toolRegistry.executeTool(appContext, t.name, t.args)
+                        EngineLogBus.info("ChatViewModel", "TOOL RESULT: $toolResult")
+                        
+                        // Append tool result to the message
+                        val currentText = lastResult?.displayReply ?: ""
+                        val newText = if (currentText.isBlank()) toolResult else "$currentText\n\n[TOOL: ${t.name.uppercase()}]\n$toolResult"
+                        repo.updateMessage(assistantMsgId!!, newText, "TOOL // ${t.name.uppercase()}")
+                    }
+
                     // Final steps after stream ends
                     val latestMsg = assistantMsgId?.let { repo.getAllMessages(convId).find { m -> m.id == it } }
                     val finalReply = latestMsg?.text ?: ""
@@ -166,6 +190,22 @@ class ChatViewModel(
             repo.deleteConversation(id)
             EngineLogBus.info("ChatViewModel", "CONVERSATION DELETED id=$id")
             if (_activeConversationId.value == id) _activeConversationId.value = null
+        }
+    }
+
+    fun clearCurrentChat() {
+        val id = _activeConversationId.value ?: return
+        viewModelScope.launch {
+            repo.clearMessages(id)
+            EngineLogBus.info("ChatViewModel", "CHAT CLEARED id=$id")
+            // Optional: re-seed with welcome message or leave empty
+            repo.addMessage(
+                conversationId = id,
+                sender = characterName,
+                text = "Chat cleared. Previous context removed.",
+                actionBadge = "SYSTEM // RESET",
+                isFromUser = false
+            )
         }
     }
 

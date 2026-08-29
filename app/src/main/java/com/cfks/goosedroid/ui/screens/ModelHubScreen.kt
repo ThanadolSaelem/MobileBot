@@ -1,10 +1,7 @@
 package com.cfks.goosedroid.ui.screens
 
-import android.content.Context
-import android.os.Environment
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -26,38 +22,33 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.cfks.goosedroid.download.ModelCatalog
-import com.cfks.goosedroid.download.ModelDownloader
 import com.cfks.goosedroid.download.ModelRepository
-import com.cfks.goosedroid.download.DownloadProgress
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.consumeEach
+import com.cfks.goosedroid.download.ModelDownloadManager
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Locale
-import android.app.DownloadManager
-import android.net.Uri
-import android.widget.Toast
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.update
+
+// Colors imported from AiSettingsScreen.kt (same package)
+
+// =============================================================================
+// Screen
+// =============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelHubScreen(navController: NavController) {
     val context = LocalContext.current
     val modelRepository = remember { ModelRepository(context) }
-    val modelDownloader = remember { ModelDownloader(context) }
     val viewModel = viewModel<ModelHubViewModel>()
 
     val localModels by viewModel.localModels.collectAsState(emptyList())
-    val downloadStates by viewModel.downloadStates.collectAsState(emptyMap())
+    val downloadStates by ModelDownloadManager.downloadStates.collectAsState(emptyMap())
 
-    // Refresh local models on screen enter
     LaunchedEffect(Unit) {
         viewModel.refreshLocalModels(modelRepository)
     }
@@ -98,7 +89,7 @@ fun ModelHubScreen(navController: NavController) {
                     fontSize = 18.sp
                 )
                 Text(
-                    "Curated GGUF models for local inference. Tap to download with resume support.",
+                    "Curated GGUF models for local inference. Tap to download via hf-mirror.com.",
                     color = TeslaLightGrey,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -120,7 +111,11 @@ fun ModelHubScreen(navController: NavController) {
                 items(localModels) { localModel ->
                     LocalModelCard(
                         localModel = localModel,
-                        onDelete = { viewModel.refreshLocalModels(modelRepository) }
+                        onDelete = {
+                            viewModel.deleteModel(modelRepository, localModel.file) {
+                                viewModel.refreshLocalModels(modelRepository)
+                            }
+                        }
                     )
                 }
             }
@@ -136,23 +131,17 @@ fun ModelHubScreen(navController: NavController) {
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            modifier = Modifier.padding(top = 16.dp)
+                            modifier = Modifier.padding(top = if (category != ModelCatalog.Category.RECOMMENDED) 16.dp else 0.dp)
                         )
                     }
                     items(models) { catalogModel ->
                         CatalogModelCard(
                             catalogModel = catalogModel,
                             localModels = localModels,
-                            modelDownloader = modelDownloader,
-                            downloadStates = downloadStates,
-                            onDownloadAction = { action, model ->
-                                when (action) {
-                                    "START" -> viewModel.startDownload(modelDownloader, model, context)
-                                    "PAUSE" -> viewModel.pauseDownload(model.id)
-                                    "RESUME" -> viewModel.resumeDownload(modelDownloader, model, context)
-                                    "CANCEL" -> viewModel.cancelDownload(model.id)
-                                }
-                            }
+                            downloadState = downloadStates[catalogModel.id],
+                            onDownload = { viewModel.startDownload(context, catalogModel) },
+                            onPause = { viewModel.pauseDownload(catalogModel.id) },
+                            onCancel = { viewModel.cancelDownload(catalogModel.id) }
                         )
                     }
                 }
@@ -161,8 +150,12 @@ fun ModelHubScreen(navController: NavController) {
     }
 }
 
+// =============================================================================
+// Local model card
+// =============================================================================
+
 @Composable
-fun LocalModelCard(
+private fun LocalModelCard(
     localModel: ModelRepository.LocalModel,
     onDelete: () -> Unit
 ) {
@@ -189,20 +182,7 @@ fun LocalModelCard(
                         fontFamily = FontFamily.Monospace
                     )
                 }
-                if (localModel.sha256 != null) {
-                    Row {
-                        Icon(Icons.Default.Info, contentDescription = "Info", tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "SHA256: ${localModel.sha256!!.substring(0, 16)}...",
-                            color = Color(0xFF4CAF50),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
             }
-
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier.background(Color(0xFF3C0000), RoundedCornerShape(8.dp))
@@ -213,25 +193,37 @@ fun LocalModelCard(
     }
 }
 
+// =============================================================================
+// Catalog model card — now driven by ModelDownloadManager.DownloadState
+// =============================================================================
+
 @Composable
-fun CatalogModelCard(
+private fun CatalogModelCard(
     catalogModel: ModelCatalog.ModelInfo,
     localModels: List<ModelRepository.LocalModel>,
-    modelDownloader: ModelDownloader,
-    downloadStates: Map<String, DownloadState>,
-    onDownloadAction: (String, ModelCatalog.ModelInfo) -> Unit
+    downloadState: ModelDownloadManager.DownloadState?,
+    onDownload: () -> Unit,
+    onPause: () -> Unit,
+    onCancel: () -> Unit
 ) {
-    val localMatch = localModels.find { it.file.name == catalogModel.filename }
-    val isDownloaded = localMatch != null
-    val downloadState = downloadStates[catalogModel.id]
+    val isDownloaded = localModels.any { it.file.name == catalogModel.filename }
     val isDownloading = downloadState?.isDownloading == true
     val progress = downloadState?.progress ?: 0f
     val status = downloadState?.status ?: ""
+    val hasError = status.startsWith("Error")
 
     Card(
         colors = CardDefaults.cardColors(containerColor = TeslaDarkGrey),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth().border(1.dp, if (isDownloading) TeslaWhite else TeslaGrey, RoundedCornerShape(8.dp))
+        modifier = Modifier.fillMaxWidth().border(
+            1.dp,
+            when {
+                isDownloading -> TeslaWhite
+                hasError -> Color(0xFFFF5252)
+                else -> TeslaGrey
+            },
+            RoundedCornerShape(8.dp)
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -251,91 +243,102 @@ fun CatalogModelCard(
                     }
                 }
 
-                if (isDownloaded) {
-                    Text(
-                        "READY",
-                        color = Color(0xFF4CAF50),
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
-                } else if (isDownloading) {
-                    // Progress indicator
-                    Column(modifier = Modifier.width(100.dp)) {
-                        LinearProgressIndicator(
-                            progress = progress / 100f,
-                            modifier = Modifier.fillMaxWidth(),
-                            color = TeslaWhite,
-                            trackColor = TeslaGrey
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${progress.toInt()}% · ${formatSpeed(downloadState?.speed ?: 0)} · ETA ${formatEta(downloadState?.eta ?: 0)}",
-                            color = TeslaWhite,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
+                when {
+                    isDownloaded -> {
+                        Text("READY", color = Color(0xFF4CAF50), fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                    isDownloading -> {
+                        Column(modifier = Modifier.width(100.dp), horizontalAlignment = Alignment.End) {
+                            LinearProgressIndicator(
+                                progress = { progress / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = TeslaWhite,
+                                trackColor = TeslaGrey
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text("${progress.toInt()}%", color = TeslaWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    hasError -> {
+                        Text("FAILED", color = Color(0xFFFF5252), fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            // Progress bar if downloading
-            if (isDownloading) {
+            // Status details & speed / ETA
+            if (isDownloading || hasError) {
                 Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (status.isNotBlank()) {
-                        Text(
-                            status,
-                            color = TeslaWhite,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                Text(
+                    status,
+                    color = if (hasError) Color(0xFFFF5252) else TeslaWhite,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                if (isDownloading) {
+                    Text(
+                        "${formatSpeed(downloadState?.speed ?: 0)} · ETA ${formatEta(downloadState?.eta ?: 0)}",
+                        color = TeslaLightGrey,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
 
-            // Action buttons
+            // Action row
             Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (isDownloaded) {
-                    // Already downloaded - no action needed
-                    Text("Tap model in AI Settings > Local to use", color = TeslaGrey, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
-                } else if (isDownloading) {
-                    Button(
-                        onClick = { onDownloadAction("PAUSE", catalogModel) },
-                        colors = ButtonDefaults.buttonColors(containerColor = TeslaGrey, contentColor = TeslaWhite),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Pause, contentDescription = "Pause", tint = TeslaWhite, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("PAUSE", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            when {
+                isDownloaded -> {
+                    Text(
+                        "Tap model in AI Settings > Local to use",
+                        color = TeslaGrey,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                isDownloading -> {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onPause,
+                            colors = ButtonDefaults.buttonColors(containerColor = TeslaGrey, contentColor = TeslaWhite),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Pause, contentDescription = "Pause", tint = TeslaWhite, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("PAUSE", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = onCancel,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C0000), contentColor = Color(0xFFFF5252)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = "Cancel", tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                        }
                     }
+                }
+                else -> {
                     Button(
-                        onClick = { onDownloadAction("CANCEL", catalogModel) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C0000), contentColor = Color(0xFFFF5252)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Cancel", tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                    }
-                } else {
-                    // Not downloaded - show download button
-                    Button(
-                        onClick = { onDownloadAction("START", catalogModel) },
-                        colors = ButtonDefaults.buttonColors(containerColor = TeslaWhite, contentColor = TeslaBlack),
+                        onClick = onDownload,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasError) Color(0xFF502020) else TeslaWhite,
+                            contentColor = if (hasError) Color(0xFFFF5252) else TeslaBlack
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Download, contentDescription = "Download", tint = TeslaBlack, modifier = Modifier.size(18.dp))
+                        Icon(
+                            if (hasError) Icons.Default.Info else Icons.Default.Download,
+                            contentDescription = "Download",
+                            tint = if (hasError) Color(0xFFFF5252) else TeslaBlack,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(Modifier.width(8.dp))
-                        Text("DOWNLOAD", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            if (hasError) "RETRY DOWNLOAD" else "DOWNLOAD",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
                 }
             }
@@ -343,107 +346,72 @@ fun CatalogModelCard(
     }
 }
 
-data class DownloadState(
-    val isDownloading: Boolean,
-    val progress: Float,
-    val speed: Long,
-    val eta: Long,
-    val status: String
-)
+// =============================================================================
+// ViewModel — thin delegation to global ModelDownloadManager
+// =============================================================================
 
-// ViewModel for ModelHub
-class ModelHubViewModel : androidx.lifecycle.ViewModel() {
+class ModelHubViewModel : ViewModel() {
     private val _localModels = kotlinx.coroutines.flow.MutableStateFlow<List<ModelRepository.LocalModel>>(emptyList())
     val localModels: kotlinx.coroutines.flow.StateFlow<List<ModelRepository.LocalModel>> = _localModels
 
-    private val _downloadStates = kotlinx.coroutines.flow.MutableStateFlow<Map<String, DownloadState>>(emptyMap())
-    val downloadStates: kotlinx.coroutines.flow.StateFlow<Map<String, DownloadState>> = _downloadStates
+    private var repository: ModelRepository? = null
 
-    private val activeDownloads = mutableMapOf<String, kotlinx.coroutines.Job>()
-
-    fun refreshLocalModels(repository: ModelRepository) {
+    fun refreshLocalModels(repo: ModelRepository) {
+        repository = repo
         viewModelScope.launch {
-            _localModels.value = repository.getLocalModels()
+            _localModels.value = repo.getLocalModels()
         }
     }
 
-    fun startDownload(downloader: ModelDownloader, model: ModelCatalog.ModelInfo, appContext: Context) {
-        if (activeDownloads.containsKey(model.id)) return
-
-        val progressChannel = Channel<DownloadProgress>(kotlinx.coroutines.channels.Channel.BUFFERED)
-        val job = viewModelScope.launch {
-            _downloadStates.update { it + (model.id to DownloadState(true, 0f, 0, 0, "Starting...")) }
-
-            val destinationDir = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            val destinationFile = File(destinationDir, model.filename)
-
-            val result = downloader.download(
-                url = "https://huggingface.co/${model.repo}/resolve/main/${model.filename}?download=true",
-                destinationFile = destinationFile,
-                expectedSha256 = model.sha256,
-                progressChannel = progressChannel,
-                scope = this
-            )
-
-            progressChannel.consumeEach { prog ->
-                _downloadStates.update { it + (model.id to DownloadState(
-                    true,
-                    prog.progressPercent,
-                    prog.speedBytesPerSec,
-                    prog.etaSeconds,
-                    prog.status
-                )) }
-            }
-
-            if (result.success) {
-                _downloadStates.update { it + (model.id to DownloadState(false, 100f, 0, 0, "Complete")) }
-                refreshLocalModels(ModelRepository(appContext))
-            } else {
-                _downloadStates.update { it + (model.id to DownloadState(false, 0f, 0, 0, "Error: ${result.errorMessage}")) }
-            }
-            activeDownloads.remove(model.id)
-        }
-        activeDownloads[model.id] = job
+    fun startDownload(context: android.content.Context, model: ModelCatalog.ModelInfo) {
+        ModelDownloadManager.startDownload(context, model)
     }
 
     fun pauseDownload(modelId: String) {
-        activeDownloads[modelId]?.cancel()
-        _downloadStates.update { it + (modelId to DownloadState(false, it[modelId]?.progress ?: 0f, 0, 0, "Paused")) }
-        activeDownloads.remove(modelId)
-    }
-
-    fun resumeDownload(downloader: ModelDownloader, model: ModelCatalog.ModelInfo, appContext: Context) {
-        startDownload(downloader, model, appContext)
+        ModelDownloadManager.pauseDownload(modelId)
     }
 
     fun cancelDownload(modelId: String) {
-        activeDownloads[modelId]?.cancel()
-        _downloadStates.update { it - modelId }
-        activeDownloads.remove(modelId)
+        ModelDownloadManager.cancelDownload(modelId)
+    }
+
+    fun deleteModel(repo: ModelRepository, file: java.io.File, onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            repo.deleteModel(file)
+            onDeleted()
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            ModelDownloadManager.downloadStates.collect { states ->
+                if (states.values.any { it.status == "Complete" }) {
+                    repository?.let { refreshLocalModels(it) }
+                }
+            }
+        }
     }
 }
 
-fun formatBytes(bytes: Long): String {
-    return when {
-        bytes >= 1_000_000_000 -> String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0)
-        bytes >= 1_000_000 -> String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0)
-        else -> String.format(Locale.US, "%.1f KB", bytes / 1000.0)
-    }
+// =============================================================================
+// Formatting helpers
+// =============================================================================
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_000_000_000 -> String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0)
+    bytes >= 1_000_000 -> String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0)
+    else -> String.format(Locale.US, "%.1f KB", bytes / 1000.0)
 }
 
-fun formatSpeed(bytesPerSec: Long): String {
-    return when {
-        bytesPerSec >= 1_000_000 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / 1_000_000.0)
-        bytesPerSec >= 1_000 -> String.format(Locale.US, "%.1f KB/s", bytesPerSec / 1000.0)
-        else -> "$bytesPerSec B/s"
-    }
+private fun formatSpeed(bytesPerSec: Long): String = when {
+    bytesPerSec >= 1_000_000 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / 1_000_000.0)
+    bytesPerSec >= 1_000 -> String.format(Locale.US, "%.1f KB/s", bytesPerSec / 1000.0)
+    else -> "$bytesPerSec B/s"
 }
 
-fun formatEta(seconds: Long): String {
-    return when {
-        seconds < 0 -> "∞"
-        seconds >= 3600 -> String.format(Locale.US, "%dh %dm", seconds / 3600, (seconds % 3600) / 60)
-        seconds >= 60 -> String.format(Locale.US, "%dm %ds", seconds / 60, seconds % 60)
-        else -> "${seconds}s"
-    }
+private fun formatEta(seconds: Long): String = when {
+    seconds < 0 -> "∞"
+    seconds >= 3600 -> String.format(Locale.US, "%dh %dm", seconds / 3600, (seconds % 3600) / 60)
+    seconds >= 60 -> String.format(Locale.US, "%dm %ds", seconds / 60, seconds % 60)
+    else -> "${seconds}s"
 }

@@ -12,16 +12,25 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cfks.goosedroid.ai.ChatEngine
@@ -55,6 +64,10 @@ fun ChatScreen(
     val isTyping = activeConversationId != null &&
         typingConversationIds.contains(activeConversationId)
     var inputText by remember { mutableStateOf("") }
+
+    var showMenu by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val messages = persistedMessages.map {
         ChatMessage(
@@ -157,7 +170,146 @@ fun ChatScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+                
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Menu",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Clear Messages", fontFamily = FontFamily.Monospace) },
+                            onClick = {
+                                showMenu = false
+                                showClearConfirm = true
+                            }
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Delete History", 
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                ) 
+                            },
+                            onClick = {
+                                showMenu = false
+                                showDeleteConfirm = true
+                            }
+                        )
+                    }
+                }
             }
+        }
+        
+        // 1.1 Dialogs
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                title = { Text("CLEAR MESSAGES?", fontFamily = FontFamily.Monospace) },
+                text = { Text("This will remove all messages in THIS chat room but keep the room entry.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.clearCurrentChat()
+                        showClearConfirm = false
+                    }) {
+                        Text("CLEAR", color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearConfirm = false }) {
+                        Text("CANCEL")
+                    }
+                }
+            )
+        }
+
+        if (showDeleteConfirm) {
+            var confirmText by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { 
+                    showDeleteConfirm = false
+                    confirmText = ""
+                },
+                containerColor = MaterialTheme.colorScheme.surface,
+                icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                title = { 
+                    Text(
+                        "DANGEROUS ZONE", 
+                        fontFamily = FontFamily.Monospace, 
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    ) 
+                },
+                text = {
+                    Column {
+                        Text(
+                            "This action CANNOT be undone.",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("This will permanently delete this conversation and all its messages.")
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text(
+                            "Type 'DELETE' to confirm:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = confirmText,
+                            onValueChange = { confirmText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.error,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        enabled = confirmText.uppercase() == "DELETE",
+                        onClick = {
+                            activeConversationId?.let { viewModel.deleteConversation(it) }
+                            showDeleteConfirm = false
+                            confirmText = ""
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            disabledContainerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("DELETE PERMANENTLY")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { 
+                        showDeleteConfirm = false
+                        confirmText = ""
+                    }) {
+                        Text("CANCEL")
+                    }
+                }
+            )
         }
 
         // 2. Chat Message Stream
@@ -216,43 +368,48 @@ fun ChatScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                             }
-                            Text(
-                                msg.text,
-                                color = if (msg.isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp
-                            )
+                            
+                            val displayText = if (!msg.isMe && msg.text.isBlank() && isTyping && messages.lastOrNull() == msg) {
+                                engineStatus ?: "... THINKING ..."
+                            } else {
+                                msg.text
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onLongPress = { 
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                val clip = ClipData.newPlainText("chat_message", displayText)
+                                                clipboard.setPrimaryClip(clip)
+                                            }
+                                        )
+                                    }
+                            ) {
+                                Text(
+                                    displayText,
+                                    color = if (msg.isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            if (isTyping) {
+            // Only show the global indicator if the last message is NOT from assistant (i.e. thinking started but no bubble yet)
+            val lastIsAssistant = messages.lastOrNull()?.isMe == false
+            if (isTyping && !lastIsAssistant) {
                 item {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                                Text(
-                                    "...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                // Live status: THINKING / RETRYING 1/3 — RATE LIMITED / OFFLINE
-                                engineStatus?.let { status ->
-                                    Text(
-                                        status,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 9.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        engineStatus ?: "... THINKING ...",
+                        modifier = Modifier.padding(16.dp),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

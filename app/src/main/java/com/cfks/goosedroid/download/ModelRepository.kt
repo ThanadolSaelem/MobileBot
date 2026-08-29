@@ -1,91 +1,126 @@
 package com.cfks.goosedroid.download
 
 import android.content.Context
-import com.cfks.goosedroid.ai.EngineLogBus
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Log
 import java.io.File
-import java.security.MessageDigest
+import java.io.FileOutputStream
 
 /**
- * Manages local GGUF model files - scanning, validation, and metadata.
+ * Manages local GGUF model files.
+ * Priority: 1) Bundled assets (copied on first run) 2) User-downloaded/imported models in internal storage
  */
 class ModelRepository(private val context: Context) {
 
-    private val modelsDir: File = File(context.filesDir, "models").apply { mkdirs() }
+    private val TAG = "ModelRepository"
+    val modelsDir = File(context.filesDir, "models")
+    private val BUNDLED_MODEL_NAME = "SmolLM-135M-Instruct-v0.2-Q4_K_M.gguf"
+
+    init {
+        modelsDir.mkdirs()
+        copyBundledModelIfNeeded()
+    }
 
     data class LocalModel(
         val file: File,
         val name: String,
         val sizeBytes: Long,
-        val sha256: String?,
         val catalogInfo: ModelCatalog.ModelInfo?
     )
 
-    /** Scan for downloaded GGUF models and match with catalog */
-    suspend fun getLocalModels(): List<LocalModel> = withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val files = modelsDir.listFiles { _, name -> name.endsWith(".gguf") } ?: emptyArray()
-        files.map { file ->
-            val catalogMatch = ModelCatalog.allModels.find { it.filename == file.name }
-            LocalModel(
-                file = file,
-                name = catalogMatch?.displayName ?: file.name.removeSuffix(".gguf"),
-                sizeBytes = file.length(),
-                sha256 = null, // Will be calculated on demand
-                catalogInfo = catalogMatch
-            )
-        }.sortedByDescending { it.file.lastModified() }
+    fun getLocalModels(): List<LocalModel> {
+        val list = mutableListOf<LocalModel>()
+
+        // 1) Internal storage (modelsDir) - Includes bundled and imported
+        if (modelsDir.exists()) {
+            modelsDir.listFiles()?.filter { it.extension == "gguf" }?.forEach { file ->
+                val catalogModel = ModelCatalog.getModelById(file.nameWithoutExtension)
+                    ?: ModelCatalog.allModels.find { it.filename == file.name }
+                list.add(LocalModel(
+                    file = file,
+                    name = file.name,
+                    sizeBytes = file.length(),
+                    catalogInfo = catalogModel
+                ))
+            }
+        }
+
+        // 2) User-downloaded models (external storage / download dir) - Optional legacy support
+        val downloadDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+        if (downloadDir != null && downloadDir.exists()) {
+            downloadDir.listFiles()?.filter { it.extension == "gguf" }?.forEach { file ->
+                // Avoid duplicates if already in internal modelsDir
+                if (list.none { it.file.name == file.name }) {
+                    val catalogModel = ModelCatalog.getModelById(file.nameWithoutExtension)
+                        ?: ModelCatalog.allModels.find { it.filename == file.name }
+                    list.add(LocalModel(
+                        file = file,
+                        name = file.name,
+                        sizeBytes = file.length(),
+                        catalogInfo = catalogModel
+                    ))
+                }
+            }
+        }
+
+        return list.distinctBy { it.file.absolutePath }
     }
 
-    /** Get the default models directory path for settings */
-    fun getModelsDir(): File = modelsDir
+    fun deleteModel(file: File): Boolean {
+        return if (file.exists() && file.delete()) {
+            Log.i(TAG, "Deleted model: ${file.name}")
+            true
+        } else false
+    }
 
-    /** Delete a downloaded model */
-    suspend fun deleteModel(file: File): Boolean = withContext(kotlinx.coroutines.Dispatchers.IO) {
+    /**
+     * Imports a model from a Uri (usually from File Picker) into internal storage.
+     * Native llama.cpp requires a direct file path.
+     */
+    fun importModelFromUri(uri: Uri): File? {
         try {
-            if (file.exists() && file.delete()) {
-                EngineLogBus.info("ModelRepository", "Deleted model: ${file.name}")
-                true
-            } else false
-        } catch (e: Exception) {
-            EngineLogBus.error("ModelRepository", "Delete failed: ${e.message}")
-            false
-        }
-    }
-
-    /** Validate a model file (checksum if available) */
-    suspend fun validateModel(file: File): Boolean = withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val catalogMatch = ModelCatalog.allModels.find { it.filename == file.name }
-        catalogMatch?.sha256?.let { expectedSha ->
-            val actualSha = calculateSha256(file)
-            return@withContext actualSha.equals(expectedSha, ignoreCase = true)
-        }
-        // No checksum in catalog, just verify it's a valid GGUF (magic bytes)
-        isValidGguf(file)
-    }
-
-    /** Quick GGUF magic bytes check */
-    private fun isValidGguf(file: File): Boolean {
-        return try {
-            file.inputStream().use { input ->
-                val buffer = ByteArray(4)
-                val read = input.read(buffer)
-                read == 4 && buffer.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46)) // "GGUF"
+            var fileName = "imported_model_${System.currentTimeMillis()}.gguf"
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    fileName = cursor.getString(nameIndex)
+                }
             }
+
+            val destFile = File(modelsDir, fileName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Log.i(TAG, "Imported model to: ${destFile.absolutePath} (${destFile.length()} bytes)")
+            return destFile
         } catch (e: Exception) {
-            false
+            Log.e(TAG, "Failed to import model from Uri: $uri", e)
+            return null
         }
     }
 
-    private suspend fun calculateSha256(file: File): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(8192)
-            var read: Int
-            while (input.read(buffer).also { read = it } != -1) {
-                digest.update(buffer, 0, read)
+    /**
+     * Copy bundled model from assets to internal storage on first run.
+     * This ensures the model is available offline immediately after install.
+     */
+    private fun copyBundledModelIfNeeded() {
+        val dest = File(modelsDir, BUNDLED_MODEL_NAME)
+        if (dest.exists()) return // already copied
+
+        Log.i(TAG, "Copying bundled model from assets...")
+        try {
+            context.assets.open("models/$BUNDLED_MODEL_NAME").use { input ->
+                FileOutputStream(dest).use { output ->
+                    input.copyTo(output)
+                }
             }
+            Log.i(TAG, "Bundled model ready: ${dest.length()} bytes")
+        } catch (e: Exception) {
+            Log.w(TAG, "Bundled model not found in assets (expected if not added yet): ${e.message}")
+            dest.delete() // cleanup partial
         }
-        digest.digest().joinToString("") { "%02X".format(it) }
     }
 }
